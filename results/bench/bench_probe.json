@@ -1,0 +1,133 @@
+[
+ {
+  "streams": 1,
+  "gpus": [
+   0
+  ],
+  "frames": 600,
+  "wall_s": 3.795993863022886,
+  "fps_total": 158.06137250237768,
+  "fps_per_stream": 158.06137250237768,
+  "per_gpu": {
+   "0": {
+    "frames": 600,
+    "wall": 3.795993863022886,
+    "timing": {
+     "decode": 0.026817677658982575,
+     "preprocess": 0.021384846651926637,
+     "detect": 0.5424611223861575,
+     "embed": 0.3122795291710645,
+     "track": 3.7044330394128338
+    },
+    "tracker": {
+     "gpu_cost": 1.5320906568085775,
+     "cpu_match": 0.2310271697351709,
+     "gpu_update": 1.8486668581608683
+    },
+    "streams": 1,
+    "ids": [
+     28
+    ]
+   }
+  },
+  "nvml": [
+   {
+    "util_mean": 19.63157894736842,
+    "util_max": 25,
+    "nvdec_mean": 0.7368421052631579,
+    "mem_max_gb": 5.99639892578125,
+    "power_mean_w": 109.20923684210527
+   }
+  ],
+  "outer_wall_s": 3.791491985321045,
+  "tag": "probe",
+  "cfg": {
+   "engine": "models/yolo26m_384x640_b64_fp16.engine",
+   "chunk": 8,
+   "max_frames": 600,
+   "use_reid": true,
+   "overlap": true,
+   "profile": false,
+   "classes": [
+    0,
+    1,
+    2,
+    3,
+    5,
+    7,
+    14,
+    15,
+    16
+   ]
+  }
+ },
+ {
+  "streams": 8,
+  "gpus": [
+   0
+  ],
+  "frames": 4800,
+  "wall_s": 9.012238843017258,
+  "fps_total": 532.6090534894192,
+  "fps_per_stream": 66.5761316861774,
+  "per_gpu": {
+   "0": {
+    "frames": 4800,
+    "wall": 9.012238843017258,
+    "timing": {
+     "decode": 0.1707216112408787,
+     "preprocess": 0.06282055110204965,
+     "detect": 1.884973215754144,
+     "embed": 1.8479943874990568,
+     "track": 8.872316337423399
+    },
+    "tracker": {
+     "gpu_cost": 2.345346013782546,
+     "cpu_match": 1.1446204101666808,
+     "gpu_update": 5.217374194529839
+    },
+    "streams": 8,
+    "ids": [
+     28,
+     27,
+     27,
+     1,
+     32,
+     28,
+     27,
+     27
+    ]
+   }
+  },
+  "nvml": [
+   {
+    "util_mean": 32.32967032967033,
+    "util_max": 53,
+    "nvdec_mean": 2.6263736263736264,
+    "mem_max_gb": 7.81292724609375,
+    "power_mean_w": 166.829
+   }
+  ],
+  "outer_wall_s": 9.032966136932373,
+  "tag": "probe",
+  "cfg": {
+   "engine": "models/yolo26m_384x640_b64_fp16.engine",
+   "chunk": 8,
+   "max_frames": 600,
+   "use_reid": true,
+   "overlap": true,
+   "profile": false,
+   "classes": [
+    0,
+    1,
+    2,
+    3,
+    5,
+    7,
+    14,
+    15,
+    16
+   ]
+  }
+ }
+]

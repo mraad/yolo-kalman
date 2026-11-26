@@ -1,0 +1,35 @@
+[WARN ][13:35:52] Container format is matroska,webm. , Seek accuracy may be impacted.
+[WARN ][13:35:52] Container format is matroska,webm. , Seek accuracy may be impacted.
+[WARN ][13:35:52] Container format is matroska,webm. , Seek accuracy may be impacted.
+[WARN ][13:35:52] Container format is matroska,webm. , Seek accuracy may be impacted.
+[WARN ][13:35:52] Container format is matroska,webm. , Seek accuracy may be impacted.
+[WARN ][13:35:52] Container format is matroska,webm. , Seek accuracy may be impacted.
+[WARN ][13:35:52] Container format is matroska,webm. , Seek accuracy may be impacted.
+[WARN ][13:35:52] Container format is matroska,webm. , Seek accuracy may be impacted.
+[WARN ][13:35:52] Container format is matroska,webm. , Seek accuracy may be impacted.
+[WARN ][13:35:52] Container format is matroska,webm. , Seek accuracy may be impacted.
+[WARN ][13:35:52] Container format is matroska,webm. , Seek accuracy may be impacted.
+[WARN ][13:35:52] Container format is matroska,webm. , Seek accuracy may be impacted.
+[WARN ][13:35:52] Container format is matroska,webm. , Seek accuracy may be impacted.
+[WARN ][13:35:52] Container format is matroska,webm. , Seek accuracy may be impacted.
+[WARN ][13:35:52] Container format is matroska,webm. , Seek accuracy may be impacted.
+[WARN ][13:35:52] Container format is matroska,webm. , Seek accuracy may be impacted.
+[WARN ][13:35:52] Container format is matroska,webm. , Seek accuracy may be impacted.
+[WARN ][13:35:52] Container format is matroska,webm. , Seek accuracy may be impacted.
+[WARN ][13:35:52] Container format is matroska,webm. , Seek accuracy may be impacted.
+[WARN ][13:35:52] Container format is matroska,webm. , Seek accuracy may be impacted.
+[WARN ][13:35:52] Container format is matroska,webm. , Seek accuracy may be impacted.
+[WARN ][13:35:52] Container format is matroska,webm. , Seek accuracy may be impacted.
+[WARN ][13:35:52] Container format is matroska,webm. , Seek accuracy may be impacted.
+[WARN ][13:35:52] Container format is matroska,webm. , Seek accuracy may be impacted.
+[WARN ][13:35:52] Container format is matroska,webm. , Seek accuracy may be impacted.
+[WARN ][13:35:52] Container format is matroska,webm. , Seek accuracy may be impacted.
+[WARN ][13:35:52] Container format is matroska,webm. , Seek accuracy may be impacted.
+[WARN ][13:35:52] Container format is matroska,webm. , Seek accuracy may be impacted.
+[WARN ][13:35:52] Container format is matroska,webm. , Seek accuracy may be impacted.
+[WARN ][13:35:52] Container format is matroska,webm. , Seek accuracy may be impacted.
+[WARN ][13:35:52] Container format is matroska,webm. , Seek accuracy may be impacted.
+[WARN ][13:35:52] Container format is matroska,webm. , Seek accuracy may be impacted.
+[11/26/2026-13:35:55] [TRT] [W] Using default stream in enqueueV3() may lead to performance issues due to additional calls to cudaStreamSynchronize() by TensorRT to ensure correct synchronization. Please use non-default stream instead.
+[11/26/2026-13:35:55] [TRT] [W] Using default stream in enqueueV3() may lead to performance issues due to additional calls to cudaStreamSynchronize() by TensorRT to ensure correct synchronization. Please use non-default stream instead.
+[dbg] streams= 8 gpus=[0, 1] workers=2 fps_total=2868 per_stream=358 wall=1.7s  gpu0:54%/dec7% gpu1:56%/dec8%  split(s/gpu)=decode:0.10 preprocess:0.05 detect:0.80 embed:0.37 track:1.50

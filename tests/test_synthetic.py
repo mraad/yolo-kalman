@@ -73,3 +73,14 @@ def test_clutter_and_metrics():
         assert m["num_switches"] == 0, m
         assert m["idf1"] > 0.85, m
         assert h["HOTA"] > 0.7, h
+
+
+def test_cuda_graph_compiled_matches_eager():
+    """torch.compile + CUDA graph path gives the same ids/boxes as plain eager torch."""
+    scenes = [gap_scene(30), crossing_scene()]
+    _, outs_g, _ = run_scenes(scenes, cfg=TrackerConfig(cuda_graph=True, compile=True))
+    _, outs_e, _ = run_scenes(scenes, cfg=TrackerConfig(cuda_graph=False, compile=False))
+    for og, oe in zip(outs_g, outs_e):
+        for (ig, bg), (ie, be) in zip(og, oe):
+            np.testing.assert_array_equal(ig, ie)
+            np.testing.assert_allclose(bg, be, atol=1e-3)

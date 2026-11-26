@@ -13,6 +13,7 @@ def run_scenes(scenes, cfg: TrackerConfig | None = None, use_emb=True, seed=0, d
     S = len(scenes)
     dets = [sc.detections(seed=seed + i, emb_dim=emb_dim, **detkw) for i, sc in enumerate(scenes)]
     T = max(sc.length for sc in scenes)
+    cfg = cfg or TrackerConfig(compile=False)  # unit tests: skip the ~30 s inductor compile
     trk = MultiStreamTracker(S, [sc.fps for sc in scenes], cfg, device=device, emb_dim=emb_dim)
     dev = trk.dev
     outs = [[] for _ in range(S)]
@@ -31,7 +32,7 @@ def run_scenes(scenes, cfg: TrackerConfig | None = None, use_emb=True, seed=0, d
         res = trk.step(tt(B), tt(Sc), tt(C), tt(V), tt(E) if use_emb else None, active=active)
         for s in range(S):
             if res[s] is not None:
-                outs[s].append((res[s].ids, res[s].boxes.cpu().numpy()))
+                outs[s].append((res[s].ids, res[s].boxes))
     gts = []
     for sc in scenes:
         g = []

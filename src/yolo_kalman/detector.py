@@ -89,6 +89,20 @@ def postprocess_raw(raw: torch.Tensor, conf: float, iou: float, max_det: int,
     return Detections(boxes, scores, clsout, valid)
 
 
+def postprocess_e2e(raw: torch.Tensor, conf: float, max_det: int, classes: torch.Tensor | None) -> Detections:
+    """NMS-free YOLO26 one-to-one head ``[B, K, 6]`` (x1,y1,x2,y2,score,cls), already score-sorted.
+
+    Pure elementwise ops: no host synchronisation at all.
+    """
+    raw = raw[:, :max_det].float()
+    boxes, scores, cls = raw[..., :4], raw[..., 4], raw[..., 5].long()
+    valid = scores > conf
+    if classes is not None:
+        valid &= torch.isin(cls, classes)
+    scores = scores * valid
+    return Detections(boxes.contiguous(), scores, cls, valid)
+
+
 def read_ultralytics_engine(path: str | Path) -> tuple[bytes, dict]:
     """Ultralytics prefixes engines with ``int32 len + JSON metadata``."""
     data = Path(path).read_bytes()
@@ -145,7 +159,10 @@ class TRTYolo:
 
     @torch.no_grad()
     def __call__(self, x: torch.Tensor) -> Detections:
-        return postprocess_raw(self.raw(x), self.conf, self.iou, self.max_det, self.classes)
+        out = self.raw(x)
+        if out.shape[-1] == 6:  # end2end (NMS-free) engine
+            return postprocess_e2e(out, self.conf, self.max_det, self.classes)
+        return postprocess_raw(out, self.conf, self.iou, self.max_det, self.classes)
 
 
 class TorchYolo:

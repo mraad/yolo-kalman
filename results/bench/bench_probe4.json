@@ -1,0 +1,216 @@
+[
+ {
+  "streams": 1,
+  "gpus": [
+   0
+  ],
+  "workers": 1,
+  "frames": 600,
+  "wall_s": 0.6883958749240264,
+  "fps_total": 871.5915098506625,
+  "fps_per_stream": 871.5915098506625,
+  "per_gpu": {
+   "0": {
+    "gpu": 0,
+    "frames": 600,
+    "wall": 0.6883958749240264,
+    "timing": {
+     "decode": 0.027531450730748475,
+     "preprocess": 0.01569504092913121,
+     "detect": 0.30568615871015936,
+     "embed": 0.3195233787409961,
+     "track": 0.5757328902836889
+    },
+    "tracker": {
+     "gpu_pre": 0.16628868016414344,
+     "cpu_match": 0.2550315719563514,
+     "gpu_post": 0.10695871454663575
+    },
+    "streams": 1,
+    "ids": [
+     28
+    ]
+   }
+  },
+  "nvml": [
+   {
+    "util_mean": 30.714285714285715,
+    "util_max": 55,
+    "nvdec_mean": 2.4285714285714284,
+    "mem_max_gb": 5.93389892578125,
+    "power_mean_w": 109.90842857142856
+   }
+  ],
+  "outer_wall_s": 0.6841557025909424,
+  "tag": "probe4",
+  "cfg": {
+   "engine": "models/yolo26m_384x640_b64_e2e_fp16.engine",
+   "chunk": 8,
+   "max_frames": 600,
+   "use_reid": true,
+   "overlap": true,
+   "profile": false,
+   "classes": [
+    0,
+    1,
+    2,
+    3,
+    5,
+    7,
+    14,
+    15,
+    16
+   ]
+  }
+ },
+ {
+  "streams": 8,
+  "gpus": [
+   0
+  ],
+  "workers": 1,
+  "frames": 4800,
+  "wall_s": 2.8948126200120896,
+  "fps_total": 1658.1384117290306,
+  "fps_per_stream": 207.26730146612883,
+  "per_gpu": {
+   "0": {
+    "gpu": 0,
+    "frames": 4800,
+    "wall": 2.8948126200120896,
+    "timing": {
+     "decode": 0.18554504227358848,
+     "preprocess": 0.13330653368029743,
+     "detect": 1.5204478373052552,
+     "embed": 0.4291408099234104,
+     "track": 2.7713903947733343
+    },
+    "tracker": {
+     "gpu_pre": 0.37619316880591214,
+     "cpu_match": 1.3579085905803367,
+     "gpu_post": 0.9407422209624201
+    },
+    "streams": 8,
+    "ids": [
+     28,
+     30,
+     22,
+     2,
+     32,
+     28,
+     30,
+     22
+    ]
+   }
+  },
+  "nvml": [
+   {
+    "util_mean": 59.03333333333333,
+    "util_max": 77,
+    "nvdec_mean": 8.833333333333334,
+    "mem_max_gb": 7.95550537109375,
+    "power_mean_w": 304.5154
+   }
+  ],
+  "outer_wall_s": 2.916842460632324,
+  "tag": "probe4",
+  "cfg": {
+   "engine": "models/yolo26m_384x640_b64_e2e_fp16.engine",
+   "chunk": 8,
+   "max_frames": 600,
+   "use_reid": true,
+   "overlap": true,
+   "profile": false,
+   "classes": [
+    0,
+    1,
+    2,
+    3,
+    5,
+    7,
+    14,
+    15,
+    16
+   ]
+  }
+ },
+ {
+  "streams": 16,
+  "gpus": [
+   0
+  ],
+  "workers": 1,
+  "frames": 9600,
+  "wall_s": 4.940386621048674,
+  "fps_total": 1943.167759199026,
+  "fps_per_stream": 121.44798494993913,
+  "per_gpu": {
+   "0": {
+    "gpu": 0,
+    "frames": 9600,
+    "wall": 4.940386621048674,
+    "timing": {
+     "decode": 0.36207514454144984,
+     "preprocess": 0.24381800298579037,
+     "detect": 3.0166031612316146,
+     "embed": 0.36772525077685714,
+     "track": 4.763563809799962
+    },
+    "tracker": {
+     "gpu_pre": 0.550128775765188,
+     "cpu_match": 2.6018632722552866,
+     "gpu_post": 1.5072872550226748
+    },
+    "streams": 16,
+    "ids": [
+     28,
+     30,
+     22,
+     2,
+     32,
+     28,
+     30,
+     22,
+     2,
+     32,
+     28,
+     30,
+     22,
+     2,
+     32,
+     28
+    ]
+   }
+  },
+  "nvml": [
+   {
+    "util_mean": 71.14,
+    "util_max": 88,
+    "nvdec_mean": 9.18,
+    "mem_max_gb": 10.45062255859375,
+    "power_mean_w": 351.58166
+   }
+  ],
+  "outer_wall_s": 4.966245889663696,
+  "tag": "probe4",
+  "cfg": {
+   "engine": "models/yolo26m_384x640_b64_e2e_fp16.engine",
+   "chunk": 8,
+   "max_frames": 600,
+   "use_reid": true,
+   "overlap": true,
+   "profile": false,
+   "classes": [
+    0,
+    1,
+    2,
+    3,
+    5,
+    7,
+    14,
+    15,
+    16
+   ]
+  }
+ }
+]

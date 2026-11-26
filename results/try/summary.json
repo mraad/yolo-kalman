@@ -1,0 +1,35 @@
+{
+ "Traffic_on_Slovenska_street_2.webm": {
+  "frames": 466,
+  "unique_ids": 28,
+  "ids_ge_1s": 25,
+  "mean_track_len_frames": 166.32142857142858,
+  "fragmentations": 64,
+  "reappear_after_gap_ge_1s": 16,
+  "max_gap_bridged_frames": 97,
+  "mean_boxes_per_frame": 9.993562231759658
+ },
+ "_run": {
+  "wall_s": 7.726499080657959,
+  "frames": 466,
+  "fps": 60.31192072054414,
+  "timing_s": {
+   "decode": 0.0598930714186281,
+   "preprocess": 0.03142133436631411,
+   "detect": 0.6496698199771345,
+   "embed": 0.48288160585798323,
+   "track": 7.266185444081202
+  },
+  "tracker_timing_s": {
+   "gpu_cost": 1.2541692138183862,
+   "cpu_match": 0.18819657037965953,
+   "gpu_update": 1.8726779407588765
+  },
+  "tracker_stats": {
+   "oru": 205,
+   "reid": 11,
+   "ocr": 36
+  },
+  "overlay": true
+ }
+}

@@ -84,3 +84,32 @@ def test_mahalanobis_matches_numpy():
         for j in range(N):
             d = dets[j] - x[:4]
             assert d2[i, j] == pytest.approx(d @ np.linalg.inv(S) @ d, rel=1e-6)
+
+
+def test_predict_dt_matches_repeated_predict_when_size_static():
+    rng = np.random.default_rng(3)
+    z0 = np.c_[rng.uniform(50, 500, (8, 2)), rng.uniform(10, 100, (8, 2))]
+    m, c = kf.initiate(torch.tensor(z0, device=DEV))
+    m[:, 4:6] = torch.tensor(rng.normal(0, 3, (8, 2)), device=DEV)  # moving, size velocity 0
+    m1, c1 = kf.predict_dt(m, c, torch.ones(8, device=DEV, dtype=torch.float64))
+    m1r, c1r = kf.predict(m, c)
+    np.testing.assert_allclose(c1.cpu().numpy(), c1r.cpu().numpy(), rtol=1e-12)
+    mr, cr = m, c
+    for _ in range(7):
+        mr, cr = kf.predict(mr, cr)
+    m7, c7 = kf.predict_dt(m, c, torch.full((8,), 7.0, device=DEV, dtype=torch.float64))
+    np.testing.assert_allclose(m7.cpu().numpy(), mr.cpu().numpy(), rtol=1e-12)
+    np.testing.assert_allclose(c7.cpu().numpy(), cr.cpu().numpy(), rtol=1e-10)
+
+
+@pytest.mark.parametrize("unrolled", [False, True])
+def test_unrolled_4x4_matches_linalg(unrolled, monkeypatch):
+    monkeypatch.setattr(kf, "UNROLLED_4X4", unrolled)
+    rng = np.random.default_rng(4)
+    A = rng.normal(size=(32, 4, 4))
+    S = A @ A.transpose(0, 2, 1) + 4 * np.eye(4)
+    B = rng.normal(size=(32, 4, 8))
+    St, Bt = torch.tensor(S, device=DEV), torch.tensor(B, device=DEV)
+    np.testing.assert_allclose(kf.spd_solve(St, Bt).cpu().numpy(), np.linalg.solve(S, B), rtol=1e-9, atol=1e-9)
+    ref = np.einsum("bin,bij,bjn->bn", B[..., :4, :], np.linalg.inv(S), B[..., :4, :])
+    np.testing.assert_allclose(kf.tri_solve_sq_norm(St, Bt).cpu().numpy(), ref, rtol=1e-9)
