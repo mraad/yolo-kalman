@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.pyc
+clips/
+results/**/*.mp4
+results/**/*.webm
+results/demo/
+models/
+*.engine
+*.onnx
+*.pt
+.pytest_cache/

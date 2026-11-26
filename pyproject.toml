@@ -1,0 +1,36 @@
+[project]
+name = "yolo-kalman"
+version = "0.1.0"
+description = "Native YOLO + GPU Kalman multi-object tracker with occlusion-robust ids (BYTE + OC-SORT + re-ID)"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "torch>=2.9",
+    "torchvision",
+    "numpy",
+    "scipy",
+    "lap",
+    "opencv-python-headless",
+    "ultralytics",
+    "nvidia-ml-py",
+    "pytest",
+    "motmetrics",
+    "pynvvideocodec>=2.2.4",
+    "tensorrt-cu13>=11.5.0.63",
+]
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu130" }
+torchvision = { index = "pytorch-cu130" }
+
+[[tool.uv.index]]
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true
+
+[build-system]
+requires = ["uv_build>=0.12.19,<0.13.0"]
+build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
