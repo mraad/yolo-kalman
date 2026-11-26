@@ -4,7 +4,7 @@
 - [x] git init, .gitignore (exclude clips/, results/ videos, models)
 - [x] uv project: torch 2.14+cu130, ultralytics 8.4, tensorrt-cu13 11.5, PyNvVideoCodec 2.2.4
 - [x] run.sh wrapper (clean LD_LIBRARY_PATH: host cuDNN 9.20 broke torch convs; `python -I`)
-- [ ] CLAUDE.md
+- [x] CLAUDE.md
 
 ## Data
 - [x] download Wikimedia 480p VP9 transcodes (generic UA) -> 12/14 clips (2 Hofer clips: no transcode, 4K originals 2.0-2.6 GB, skipped)
@@ -31,15 +31,15 @@
 - [x] KF vs NumPy reference (+ multi-step predict, unrolled 4x4 Cholesky)
 - [x] synthetic scenes: gaps 10/30/60/120 (batched streams), crossings, speed change, clutter
 - [x] CUDA-graph/compiled path == eager path
-- [ ] e2e on short real clip
+- [x] e2e on short real clip (+ rendered synthetic clip with real detector)
 
 ## Metrics / bench
 - [x] HOTA/IDF1/IDSW on synthetic GT clips + ablations (results/synth/metrics.md)
-- [ ] real clips: id count, fragmentation, overlays
-- [ ] benchmark 1/4/8/16 streams over 2 GPUs, NVML util, time split
-- [ ] iterate on bottleneck / document it
+- [x] real clips: id count, fragmentation, overlays (results/real_table.md)
+- [x] benchmark 1/4/8/16/32 streams over 2 GPUs, NVML util, time split
+- [x] iterate on bottleneck / document it (CPU matching cascade in tracker consumer)
 
 ## Wrap-up
-- [ ] README (commands, results, licences)
-- [ ] demo in tmux `tracker-demo` -> results/demo, stop when done
-- [ ] DONE summary
+- [x] README (commands, results, licences)
+- [x] demo in tmux `tracker-demo` -> results/demo (12 overlays, exit 0, session closed)
+- [x] DONE summary

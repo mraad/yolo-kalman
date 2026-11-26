@@ -1,0 +1,10 @@
+1. Built: native YOLO26m (TensorRT FP16, NMS-free head, ~3,300 img/s/GPU) + own PyTorch GPU tracker: batched CV Kalman (NSA), BYTE, Mahalanobis gating, OC-SORT ORU/OCM/OCR, 8 s lost buffer, ResNet-18 RoI re-ID with EMA and young-track id recovery.
+2. GPU pipeline: NVDEC (PyNvVideoCodec) -> GPU letterbox -> batched TRT -> batched embeddings -> tracker as 2 CUDA graphs per step (torch.compile'd), batched over streams; images stay on the GPU.
+3. Synthetic clips with GT (grey bar, real detector): 13/13 full occlusions keep the same id (gaps 10–157 frames), 0 ID switches, HOTA 0.85–0.88, IDF1 0.94–0.97 (results/synth/metrics.md).
+4. Ablations: without re-ID, gaps of 60+ frames lose the id (0/3); the ByteTrack-like baseline fails from 30 frames on.
+5. Real clips (12 Wikimedia, 24,837 frames): 603 ids vs 833 without re-ID, 510 vs 237 re-acquisitions after ≥1 s gaps; no ground truth, so possible wrong merges are unverified.
+6. Throughput on 2 GPUs: 845 fps (1 stream), 2,268 (4), 2,669 (8), 3,015 (16), 3,519 (32); NVML util 40–61% (93% with 2 workers/GPU, +12% at 16 streams, nothing gained at 32).
+7. Bottleneck: the tracker consumer, mainly the CPU lapjv matching cascade plus graph syncs (track time ≈ wall); the detector ceiling would be ~6,600 fps.
+8. Tests: 14 pytest (KF vs NumPy, multi-step/unrolled Cholesky, synthetic gaps 10/30/60/120 + crossings, graph == eager, 2 e2e) all pass.
+9. Failed/skipped: 2 of 14 clips (Hofer, no transcodes, 4K originals 2–2.6 GB); no permissive detector built; HOTA is a re-implementation; a 2-GPU benchmark hang was traced to concurrent inductor compiles (fixed with single-threaded compile).
+10. Demo: tmux `tracker-demo` rendered overlays of all clips to results/demo and exited; see README.md, CLAUDE.md, tasks/todo.md.
