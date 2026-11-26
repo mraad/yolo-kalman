@@ -26,7 +26,7 @@ def main():
     ap.add_argument("--chunk", type=int, default=8)
     ap.add_argument("--overlay", action="store_true")
     ap.add_argument("--no-reid", action="store_true")
-    ap.add_argument("--lost-s", type=float, default=6.0)
+    ap.add_argument("--lost-s", type=float, default=8.0)
     ap.add_argument("--max-frames", type=int, default=None)
     ap.add_argument("--classes", type=int, nargs="*", default=None)
     a = ap.parse_args()

@@ -54,7 +54,7 @@ class TrackerConfig:
     unconfirmed_thresh: float = 0.7  # S5 max 1-IoU
     gate_chi2: float = 13.277       # chi2(4 dof, 0.99): Mahalanobis gate for S1/S2
     reid_gate_chi2: float = 60.0    # loose gate for S4 (KF covariance grows while coasting)
-    lost_buffer_s: float = 6.0      # how long lost tracks coast before deletion (seconds)
+    lost_buffer_s: float = 8.0      # how long lost tracks coast before deletion (seconds)
     ocr_max_gap: int = 30           # S3 only for tracks lost <= this many frames
     n_init: int = 2                 # hits to confirm a tentative track
     # appearance
@@ -64,6 +64,12 @@ class TrackerConfig:
     proximity_thresh: float = 0.5   # ... and 1-IoU below this (BoT-SORT fusion)
     reid_thresh: float = 0.25       # S4: max cos-dist for re-identification
     emb_update_max_overlap: float = 0.4  # skip EMA update when det overlaps another det (occluder)
+    # id recovery: a *young* confirmed track (born while some track was lost) whose embedding
+    # matches that lost track inherits the old id (the re-appearing object is often first seen
+    # only partially, so the S4 re-ID match can fail during its first frames)
+    id_recovery: bool = True
+    young_min_frames: int = 3
+    young_max_frames: int = 45
     # OC-SORT
     ocm_weight: float = 0.2
     ocm_delta: int = 3
@@ -72,8 +78,11 @@ class TrackerConfig:
     freeze_size_when_lost: bool = True
     # low-quality observations (score < high_thresh, or box abruptly shrinks = partial occlusion):
     # inflate R, and do not use them as OC-SORT "observations" (snapshot / last_obs / OCM history)
-    low_quality_r_scale: float = 100.0
-    shape_change_ratio: float = 0.75
+    low_quality_r_scale: float = 1e4
+    shape_change_ratio: float = 0.9    # min det size / reference size (w and h) for a trusted obs
+    size_ema: float = 0.9              # reference size = slow EMA over trusted observations (resists
+                                       # gradual erosion of the box as an object slides behind an occluder)
+    low_quality_size_r_scale: float = 1e4  # ... and do not let them change the box size
     class_aware: bool = True
     class_groups: dict = field(default_factory=lambda: dict(DEFAULT_CLASS_GROUPS))
     max_tracks: int = 160           # slots per stream (M)
@@ -126,6 +135,7 @@ class MultiStreamTracker:
         self.in_valid = torch.zeros(S, N, dtype=torch.bool, device=dev)
         self.in_emb = torch.zeros(S, N, D, device=dev)
         self.dz = torch.zeros(S, N, 4, device=dev)
+        self._lq_scale = torch.tensor([c.low_quality_r_scale] * 2 + [c.low_quality_size_r_scale] * 2, device=dev)
         self.pre_dev = torch.zeros(3, S, M, device=dev)       # live, lost, k_prev
         self.post_dev = torch.zeros(8, S, M, device=dev)      # see _post
         self.pre_host = torch.zeros(3, S, M, **pin)
@@ -133,7 +143,8 @@ class MultiStreamTracker:
         # ---- static outputs (pinned host) ----
         self.cost_host = torch.zeros(S, 5, M, N, dtype=torch.float16, **pin)
         self.det_host = torch.zeros(S, N, 3, **pin)           # det-det max overlap, det w, det h
-        self.twh_host = torch.zeros(S, M, 2, **pin)
+        self.twh_host = torch.zeros(S, M, 4, **pin)
+        self.tt_host = torch.zeros(S, 2, M, M, dtype=torch.float16, **pin)  # track-track emb dist, d2            # predicted w,h ; last trusted obs w,h
         self.out_host = torch.zeros(S, M, 4, **pin)
         self._reset_gpu_state()
         # ---- CPU bookkeeping ----
@@ -144,6 +155,9 @@ class MultiStreamTracker:
         self.hits = np.zeros((S, M), np.int32)
         self.nobs = np.zeros((S, M), np.int32)
         self.has_emb = np.zeros((S, M), bool)
+        self.ref_wh = np.ones((S, M, 2), np.float32)  # slow EMA of trusted box size (w, h)
+        self.birth = np.zeros((S, M), np.int64)       # frame the slot's track was born
+        self.emb_count = np.zeros((S, M), np.int32)   # appearance updates so far
         self.cls = np.zeros((S, M), np.int64)
         self.score = np.zeros((S, M), np.float32)
         self.next_id = np.ones(S, np.int64)
@@ -153,7 +167,7 @@ class MultiStreamTracker:
             lut[k] = v
         self._group_lut = lut
         self.timing = {"gpu_pre": 0.0, "cpu_match": 0.0, "gpu_post": 0.0}
-        self.stats = {"oru": 0, "reid": 0, "ocr": 0, "dropped_dets": 0, "slots_full": 0}
+        self.stats = {"oru": 0, "reid": 0, "ocr": 0, "id_recovered": 0, "dropped_dets": 0, "slots_full": 0}
         self.graphs = {}
         if c.compile and cuda:
             kf.UNROLLED_4X4 = True  # element-wise 4x4 Cholesky: fused by inductor
@@ -187,7 +201,8 @@ class MultiStreamTracker:
         for name, fn in (("pre", self._pre), ("post", lambda: self._post(False)),
                          ("post_oru", lambda: self._post(True))):
             g = torch.cuda.CUDAGraph()
-            with torch.cuda.graph(g, stream=s):
+            # thread_local: NVDEC decoder threads keep issuing CUDA calls while we capture
+            with torch.cuda.graph(g, stream=s, capture_error_mode="thread_local"):
                 fn()
             self.graphs[name] = g
         torch.cuda.synchronize(self.dev)
@@ -202,8 +217,9 @@ class MultiStreamTracker:
     # ------------------------------------------------------------------------------------------
     def _pre(self):
         """graph A: predict + cost terms (dense over all slots), then pinned D2H copies."""
-        packed, det, twh = self._pre_core()
+        packed, det, twh, tt = self._pre_core()
         self.cost_host.copy_(packed, non_blocking=True)
+        self.tt_host.copy_(tt, non_blocking=True)
         self.det_host.copy_(det, non_blocking=True)
         self.twh_host.copy_(twh, non_blocking=True)
 
@@ -240,7 +256,12 @@ class MultiStreamTracker:
         dd = kf.pairwise_iou(boxes, boxes)
         eye = torch.eye(boxes.shape[1], device=boxes.device, dtype=torch.bool)
         dd = dd.masked_fill(eye | ~self.in_valid[:, None, :], 0).amax(-1)
-        return packed.half(), torch.cat([dd[..., None], dz[..., 2:4]], -1), self.mean[..., 2:4].clone()
+        # track-track terms for id recovery: rows = (lost) track distribution, cols = (young) track box
+        tt_e = 1.0 - torch.einsum("smd,snd->smn", self.emb, self.emb)
+        tt_d2 = kf.mahalanobis_sq(self.mean, self.cov, self.mean[..., :4])
+        tt = torch.nan_to_num(torch.stack([tt_e, tt_d2], 1), nan=BIG, posinf=BIG, neginf=-BIG).clamp(-BIG, BIG)
+        return (packed.half(), torch.cat([dd[..., None], dz[..., 2:4]], -1),
+                torch.cat([self.mean[..., 2:4], self.last_obs[..., 2:4]], -1), tt.half())
 
     def _post(self, with_oru: bool):
         """graph B: dense masked update / ORU / initiation / appearance EMA, then output D2H."""
@@ -262,7 +283,8 @@ class MultiStreamTracker:
         g4 = lambda x, i: x.gather(1, i[..., None].expand(S, M, x.shape[-1]))
         z = g4(self.dz, mdet)
         zs = self.in_scores.gather(1, mdet)
-        rsc = torch.where(good, 1.0, c.low_quality_r_scale)
+        lq = self._lq_scale
+        rsc = torch.where(good[..., None], torch.ones_like(lq), lq)       # per-dimension R scale
         um, uc = kf.update(self.mean, self.cov, z, zs, rsc)
         if with_oru:
             rm, rc = self._oru_dense(z, zs, gap)
@@ -270,6 +292,8 @@ class MultiStreamTracker:
             um = torch.where(oru[..., None], rm, um)
             uc = torch.where(oru[..., None, None], rc, uc)
         um[..., 2:4] = um[..., 2:4].clamp(min=1.0)
+        # low-quality (partially occluded) match: coast -- no size velocity either
+        um[..., 6:8] = torch.where(good[..., None], um[..., 6:8], 0.0)
         nz = g4(self.dz, ndet)
         nm, nc = kf.initiate(nz)
         mean = torch.where(matched[..., None], um, self.mean)
@@ -386,6 +410,7 @@ class MultiStreamTracker:
         dh = self.det_host.numpy()
         dd_np, dwh = dh[..., 0], dh[..., 1:3]
         twh = self.twh_host.numpy()
+        tt = self.tt_host.numpy()
         t1 = time.perf_counter()
 
         # ---- CPU matching cascade -------------------------------------------------------------
@@ -449,7 +474,11 @@ class MultiStreamTracker:
 
             for a, b, stage in pairs:
                 slot = sl[a]
-                ratio = (dwh[s, b] / np.maximum(twh[s, slot], 1e-3)).min()
+                # partial occlusion = box much smaller than the track's reference size (slow EMA of
+                # trusted sizes; follows genuine gradual scale change, not sudden erosion)
+                ref = self.ref_wh[s, slot]
+                ratio = min((dwh[s, b] / np.maximum(ref, 1e-3)).min(),
+                            (dwh[s, b] / np.maximum(twh[s, slot, :2], 1e-3)).min())
                 good = bool(sc[b] >= cfg.high_thresh and ratio >= cfg.shape_change_ratio)
                 gap = int(self.tsg[s, slot]) if good else 0
                 self.stats["ocr"] += stage == 3
@@ -466,6 +495,7 @@ class MultiStreamTracker:
                 if good:
                     self.tsg[s, slot] = 0
                     self.nobs[s, slot] += 1
+                    self.ref_wh[s, slot] = cfg.size_ema * ref + (1 - cfg.size_ema) * dwh[s, b]
                 self.score[s, slot] = sc[b]
                 if sc[b] >= cfg.high_thresh:
                     self.cls[s, slot] = cls_np[s, b]
@@ -477,10 +507,11 @@ class MultiStreamTracker:
                     self.state[s, slot] = TRACKED
                 if use_emb and good and dd_np[s, b] < cfg.emb_update_max_overlap:
                     trust = (sc[b] - cfg.high_thresh) / (1 - cfg.high_thresh)   # dynamic EMA
+                    k = self.emb_count[s, slot]   # running mean for the first updates, then EMA
                     post[6, s, slot] = 1
-                    post[7, s, slot] = (cfg.emb_alpha + (1 - cfg.emb_alpha) * (1 - trust)) \
-                        if self.has_emb[s, slot] else 0.0
+                    post[7, s, slot] = min(cfg.emb_alpha + (1 - cfg.emb_alpha) * (1 - trust), k / (k + 1.0))
                     self.has_emb[s, slot] = True
+                    self.emb_count[s, slot] = k + 1
             # unmatched tracks
             for a in np.nonzero(~matched_t)[0]:
                 slot = sl[a]
@@ -508,10 +539,31 @@ class MultiStreamTracker:
                 self.hits[s, slot] = self.nobs[s, slot] = 1
                 self.cls[s, slot] = cls_np[s, d]
                 self.score[s, slot] = sc[d]
+                self.ref_wh[s, slot] = dwh[s, d]
                 self.has_emb[s, slot] = use_emb and dd_np[s, d] < cfg.emb_update_max_overlap
+                self.emb_count[s, slot] = int(self.has_emb[s, slot])
+                self.birth[s, slot] = self.frame[s]
                 if self.has_emb[s, slot]:
                     post[6, s, slot] = 1
                     post[7, s, slot] = 0.0
+            # id recovery: young confirmed tracks vs tracks that were already lost when they were born
+            if use_emb and cfg.id_recovery:
+                age = self.frame[s] - self.birth[s]
+                young = np.nonzero((self.state[s] == TRACKED) & (self.tsu[s] == 0) & self.has_emb[s]
+                                   & (age >= cfg.young_min_frames) & (age <= cfg.young_max_frames))[0]
+                lost = np.nonzero((self.state[s] == LOST) & self.has_emb[s] & (self.tsu[s] > 1))[0]
+                if len(young) and len(lost):
+                    last_seen = self.frame[s] - self.tsu[s, lost]
+                    E = tt[s, 0][np.ix_(lost, young)].astype(np.float32)
+                    G = tt[s, 1][np.ix_(lost, young)].astype(np.float32)
+                    ok = (G <= cfg.reid_gate_chi2) & (last_seen[:, None] < self.birth[s, young][None, :]) \
+                        & (self._group_lut[self.cls[s, lost]][:, None] == self._group_lut[self.cls[s, young]][None, :])
+                    r, k = _lap(np.where(ok, E, BIG), cfg.reid_thresh)
+                    for a, b in zip(lost[r], young[k]):
+                        self.ids[s, b] = self.ids[s, a]
+                        self.state[s, a] = FREE
+                        self.birth[s, b] = self.birth[s, a]
+                        self.stats["id_recovered"] += 1
         t2 = time.perf_counter()
 
         # ---- GPU post-match update ------------------------------------------------------------

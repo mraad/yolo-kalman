@@ -81,8 +81,8 @@ def measurement_cov(mean: torch.Tensor, score: torch.Tensor | None = None,
     var = (STD_POS * wh) ** 2
     if score is not None:
         var = var * (1.0 - score.clamp(0.0, 0.99))[..., None]
-    if r_scale is not None:
-        var = var * r_scale[..., None]
+    if r_scale is not None:  # scalar per measurement [...] or per dimension [...,4]
+        var = var * (r_scale if r_scale.dim() == var.dim() else r_scale[..., None])
     return torch.diag_embed(var)
 
 

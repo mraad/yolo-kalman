@@ -10,3 +10,4 @@ models/
 *.onnx
 *.pt
 .pytest_cache/
+data/synth/*.mp4
