@@ -1,0 +1,101 @@
+[
+ {
+  "streams": 8,
+  "gpus": [
+   0,
+   1
+  ],
+  "workers": 2,
+  "frames": 9600,
+  "wall_s": 3.597061278996989,
+  "fps_total": 2668.845275462441,
+  "fps_per_stream": 333.6056594328051,
+  "per_gpu": {
+   "0": {
+    "gpu": 0,
+    "frames": 4800,
+    "wall": 3.597061278996989,
+    "timing": {
+     "decode": 0.18216116132680327,
+     "preprocess": 0.0888313694158569,
+     "detect": 1.5920851678820327,
+     "embed": 0.7206481442553923,
+     "track": 3.4511571077164263
+    },
+    "tracker": {
+     "gpu_pre": 0.5578020915854722,
+     "cpu_match": 1.9824795639142394,
+     "gpu_post": 0.7195631369249895
+    },
+    "streams": 4,
+    "ids": [
+     55,
+     40,
+     65,
+     55
+    ]
+   },
+   "1": {
+    "gpu": 1,
+    "frames": 4800,
+    "wall": 3.39979354897514,
+    "timing": {
+     "decode": 0.17918553994968534,
+     "preprocess": 0.08286229695659131,
+     "detect": 1.5965203328523785,
+     "embed": 0.7990492705721408,
+     "track": 3.273701738798991
+    },
+    "tracker": {
+     "gpu_pre": 0.6173232068540528,
+     "cpu_match": 1.7455259039998055,
+     "gpu_post": 0.7116802016971633
+    },
+    "streams": 4,
+    "ids": [
+     55,
+     2,
+     56,
+     40
+    ]
+   }
+  },
+  "nvml": [
+   {
+    "util_mean": 50.8,
+    "util_max": 65,
+    "nvdec_mean": 7.2,
+    "mem_max_gb": 6.8740234375,
+    "power_mean_w": 267.9216
+   },
+   {
+    "util_mean": 47.9,
+    "util_max": 64,
+    "nvdec_mean": 6.6,
+    "mem_max_gb": 6.8271484375,
+    "power_mean_w": 275.25335
+   }
+  ],
+  "outer_wall_s": 3.9294352531433105,
+  "tag": "twogpu_s8",
+  "cfg": {
+   "engine": "models/yolo26m_384x640_b64_e2e_fp16.engine",
+   "chunk": 8,
+   "max_frames": 1200,
+   "use_reid": true,
+   "overlap": true,
+   "profile": false,
+   "classes": [
+    0,
+    1,
+    2,
+    3,
+    5,
+    7,
+    14,
+    15,
+    16
+   ]
+  }
+ }
+]

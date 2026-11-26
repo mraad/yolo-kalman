@@ -1,0 +1,19 @@
+[WARN ][14:10:17] Container format is matroska,webm. , Seek accuracy may be impacted.
+[WARN ][14:10:17] Container format is matroska,webm. , Seek accuracy may be impacted.
+[WARN ][14:10:17] Container format is matroska,webm. , Seek accuracy may be impacted.
+[WARN ][14:10:17] Container format is matroska,webm. , Seek accuracy may be impacted.
+[WARN ][14:10:17] Container format is matroska,webm. , Seek accuracy may be impacted.
+[WARN ][14:10:17] Container format is matroska,webm. , Seek accuracy may be impacted.
+[WARN ][14:10:17] Container format is matroska,webm. , Seek accuracy may be impacted.
+[WARN ][14:10:17] Container format is matroska,webm. , Seek accuracy may be impacted.
+[WARN ][14:10:17] Container format is matroska,webm. , Seek accuracy may be impacted.
+[WARN ][14:10:17] Container format is matroska,webm. , Seek accuracy may be impacted.
+[WARN ][14:10:17] Container format is matroska,webm. , Seek accuracy may be impacted.
+[WARN ][14:10:17] Container format is matroska,webm. , Seek accuracy may be impacted.
+[WARN ][14:10:17] Container format is matroska,webm. , Seek accuracy may be impacted.
+[WARN ][14:10:17] Container format is matroska,webm. , Seek accuracy may be impacted.
+[11/26/2026-14:10:17] [TRT] [W] Using default stream in enqueueV3() may lead to performance issues due to additional calls to cudaStreamSynchronize() by TensorRT to ensure correct synchronization. Please use non-default stream instead.
+[WARN ][14:10:17] Container format is matroska,webm. , Seek accuracy may be impacted.
+[WARN ][14:10:17] Container format is matroska,webm. , Seek accuracy may be impacted.
+[11/26/2026-14:10:17] [TRT] [W] Using default stream in enqueueV3() may lead to performance issues due to additional calls to cudaStreamSynchronize() by TensorRT to ensure correct synchronization. Please use non-default stream instead.
+[twogpu_s4] streams= 4 gpus=[0, 1] workers=2 fps_total=2268 per_stream=567 wall=2.1s  gpu0:47%/dec6% gpu1:45%/dec6%  split(s/gpu)=decode:0.09 preprocess:0.06 detect:0.88 embed:0.69 track:1.81

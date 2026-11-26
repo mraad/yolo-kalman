@@ -1,0 +1,35 @@
+[WARN ][14:11:17] Container format is matroska,webm. , Seek accuracy may be impacted.
+[WARN ][14:11:17] Container format is matroska,webm. , Seek accuracy may be impacted.
+[WARN ][14:11:17] Container format is matroska,webm. , Seek accuracy may be impacted.
+[WARN ][14:11:17] Container format is matroska,webm. , Seek accuracy may be impacted.
+[WARN ][14:11:17] Container format is matroska,webm. , Seek accuracy may be impacted.
+[WARN ][14:11:17] Container format is matroska,webm. , Seek accuracy may be impacted.
+[WARN ][14:11:17] Container format is matroska,webm. , Seek accuracy may be impacted.
+[WARN ][14:11:17] Container format is matroska,webm. , Seek accuracy may be impacted.
+[WARN ][14:11:17] Container format is matroska,webm. , Seek accuracy may be impacted.
+[WARN ][14:11:17] Container format is matroska,webm. , Seek accuracy may be impacted.
+[WARN ][14:11:17] Container format is matroska,webm. , Seek accuracy may be impacted.
+[WARN ][14:11:17] Container format is matroska,webm. , Seek accuracy may be impacted.
+[WARN ][14:11:17] Container format is matroska,webm. , Seek accuracy may be impacted.
+[WARN ][14:11:17] Container format is matroska,webm. , Seek accuracy may be impacted.
+[WARN ][14:11:17] Container format is matroska,webm. , Seek accuracy may be impacted.
+[WARN ][14:11:17] Container format is matroska,webm. , Seek accuracy may be impacted.
+[11/26/2026-14:11:17] [TRT] [W] Using default stream in enqueueV3() may lead to performance issues due to additional calls to cudaStreamSynchronize() by TensorRT to ensure correct synchronization. Please use non-default stream instead.
+[WARN ][14:11:17] Container format is matroska,webm. , Seek accuracy may be impacted.
+[WARN ][14:11:17] Container format is matroska,webm. , Seek accuracy may be impacted.
+[WARN ][14:11:17] Container format is matroska,webm. , Seek accuracy may be impacted.
+[WARN ][14:11:17] Container format is matroska,webm. , Seek accuracy may be impacted.
+[WARN ][14:11:17] Container format is matroska,webm. , Seek accuracy may be impacted.
+[WARN ][14:11:17] Container format is matroska,webm. , Seek accuracy may be impacted.
+[WARN ][14:11:17] Container format is matroska,webm. , Seek accuracy may be impacted.
+[WARN ][14:11:17] Container format is matroska,webm. , Seek accuracy may be impacted.
+[WARN ][14:11:17] Container format is matroska,webm. , Seek accuracy may be impacted.
+[WARN ][14:11:17] Container format is matroska,webm. , Seek accuracy may be impacted.
+[WARN ][14:11:17] Container format is matroska,webm. , Seek accuracy may be impacted.
+[WARN ][14:11:17] Container format is matroska,webm. , Seek accuracy may be impacted.
+[WARN ][14:11:17] Container format is matroska,webm. , Seek accuracy may be impacted.
+[WARN ][14:11:17] Container format is matroska,webm. , Seek accuracy may be impacted.
+[WARN ][14:11:17] Container format is matroska,webm. , Seek accuracy may be impacted.
+[WARN ][14:11:17] Container format is matroska,webm. , Seek accuracy may be impacted.
+[11/26/2026-14:11:17] [TRT] [W] Using default stream in enqueueV3() may lead to performance issues due to additional calls to cudaStreamSynchronize() by TensorRT to ensure correct synchronization. Please use non-default stream instead.
+[twogpu_s8] streams= 8 gpus=[0, 1] workers=2 fps_total=2669 per_stream=334 wall=3.6s  gpu0:51%/dec7% gpu1:48%/dec7%  split(s/gpu)=decode:0.18 preprocess:0.09 detect:1.59 embed:0.76 track:3.36

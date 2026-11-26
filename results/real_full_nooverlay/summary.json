@@ -1,0 +1,148 @@
+{
+ "Calle_preciados.webm": {
+  "frames": 456,
+  "unique_ids": 37,
+  "ids_ge_1s": 20,
+  "mean_track_len_frames": 138.75675675675674,
+  "fragmentations": 145,
+  "reappear_after_gap_ge_1s": 24,
+  "max_gap_bridged_frames": 138,
+  "mean_boxes_per_frame": 11.258771929824562
+ },
+ "Inbound_B_Branch_train__March_2021.webm": {
+  "frames": 2100,
+  "unique_ids": 107,
+  "ids_ge_1s": 50,
+  "mean_track_len_frames": 76.20560747663552,
+  "fragmentations": 441,
+  "reappear_after_gap_ge_1s": 81,
+  "max_gap_bridged_frames": 215,
+  "mean_boxes_per_frame": 3.882857142857143
+ },
+ "Lisboa_Carris__40267618395.webm": {
+  "frames": 225,
+  "unique_ids": 19,
+  "ids_ge_1s": 11,
+  "mean_track_len_frames": 45.1578947368421,
+  "fragmentations": 35,
+  "reappear_after_gap_ge_1s": 2,
+  "max_gap_bridged_frames": 104,
+  "mean_boxes_per_frame": 3.8133333333333335
+ },
+ "London_United_LTZ1130_passing_House_of_Commons_in_May_2015.webm": {
+  "frames": 116,
+  "unique_ids": 23,
+  "ids_ge_1s": 6,
+  "mean_track_len_frames": 19.91304347826087,
+  "fragmentations": 37,
+  "reappear_after_gap_ge_1s": 5,
+  "max_gap_bridged_frames": 87,
+  "mean_boxes_per_frame": 3.9482758620689653
+ },
+ "MD_355_and_MD_124_Gaithersburg_MD_2022_07_30_11_07_03_1.webm": {
+  "frames": 1974,
+  "unique_ids": 85,
+  "ids_ge_1s": 42,
+  "mean_track_len_frames": 184.43529411764706,
+  "fragmentations": 734,
+  "reappear_after_gap_ge_1s": 137,
+  "max_gap_bridged_frames": 238,
+  "mean_boxes_per_frame": 7.941742654508612
+ },
+ "Roncesvalles_Ave_crossing_at_Galley_Ave__PXO_Type_A_lights_f.webm": {
+  "frames": 390,
+  "unique_ids": 13,
+  "ids_ge_1s": 11,
+  "mean_track_len_frames": 234.30769230769232,
+  "fragmentations": 18,
+  "reappear_after_gap_ge_1s": 2,
+  "max_gap_bridged_frames": 61,
+  "mean_boxes_per_frame": 7.81025641025641
+ },
+ "Soundscapes_of_Norrk_ping__1____Skvallertorget.webm": {
+  "frames": 1702,
+  "unique_ids": 84,
+  "ids_ge_1s": 43,
+  "mean_track_len_frames": 76.88095238095238,
+  "fragmentations": 338,
+  "reappear_after_gap_ge_1s": 53,
+  "max_gap_bridged_frames": 237,
+  "mean_boxes_per_frame": 3.7943595769682728
+ },
+ "Soundscapes_of_Norrk_ping__4____Train_station.webm": {
+  "frames": 1994,
+  "unique_ids": 59,
+  "ids_ge_1s": 32,
+  "mean_track_len_frames": 91.35593220338983,
+  "fragmentations": 291,
+  "reappear_after_gap_ge_1s": 47,
+  "max_gap_bridged_frames": 235,
+  "mean_boxes_per_frame": 2.703109327983952
+ },
+ "Starling_bathing_one_sparrow_eating_two_doves_walking_around.webm": {
+  "frames": 10540,
+  "unique_ids": 27,
+  "ids_ge_1s": 14,
+  "mean_track_len_frames": 310.962962962963,
+  "fragmentations": 224,
+  "reappear_after_gap_ge_1s": 43,
+  "max_gap_bridged_frames": 434,
+  "mean_boxes_per_frame": 0.796584440227704
+ },
+ "Strassenbahn_Gmunden_in_der_Alois_Kaltenbruner_Strasse_2011.webm": {
+  "frames": 3521,
+  "unique_ids": 53,
+  "ids_ge_1s": 18,
+  "mean_track_len_frames": 54.283018867924525,
+  "fragmentations": 257,
+  "reappear_after_gap_ge_1s": 28,
+  "max_gap_bridged_frames": 214,
+  "mean_boxes_per_frame": 0.8170974155069582
+ },
+ "Traffic_on_Slovenska_street.webm": {
+  "frames": 1353,
+  "unique_ids": 74,
+  "ids_ge_1s": 43,
+  "mean_track_len_frames": 143.54054054054055,
+  "fragmentations": 335,
+  "reappear_after_gap_ge_1s": 76,
+  "max_gap_bridged_frames": 194,
+  "mean_boxes_per_frame": 7.85070214338507
+ },
+ "Traffic_on_Slovenska_street_2.webm": {
+  "frames": 466,
+  "unique_ids": 22,
+  "ids_ge_1s": 15,
+  "mean_track_len_frames": 118.77272727272727,
+  "fragmentations": 79,
+  "reappear_after_gap_ge_1s": 12,
+  "max_gap_bridged_frames": 77,
+  "mean_boxes_per_frame": 5.6072961373390555
+ },
+ "_run": {
+  "wall_s": 20.90037989616394,
+  "frames": 24837,
+  "fps": 1188.3516052528112,
+  "timing_s": {
+   "decode": 1.319417133461684,
+   "preprocess": 0.5620411864947528,
+   "detect": 9.920120942289941,
+   "embed": 8.310353956068866,
+   "track": 18.64369656133931
+  },
+  "tracker_timing_s": {
+   "gpu_pre": 5.676560508087277,
+   "cpu_match": 7.954156100284308,
+   "gpu_post": 3.840764314867556
+  },
+  "tracker_stats": {
+   "oru": 3291,
+   "reid": 1217,
+   "ocr": 729,
+   "id_recovered": 175,
+   "dropped_dets": 0,
+   "slots_full": 0
+  },
+  "overlay": false
+ }
+}

@@ -28,7 +28,8 @@ def main():
     ap.add_argument("--no-reid", action="store_true")
     ap.add_argument("--lost-s", type=float, default=8.0)
     ap.add_argument("--max-frames", type=int, default=None)
-    ap.add_argument("--classes", type=int, nargs="*", default=None)
+    ap.add_argument("--classes", type=int, nargs="*", default=[0, 1, 2, 3, 5, 7, 14, 15, 16],
+                    help="COCO ids: person, bicycle, car, motorcycle, bus, truck, bird, cat, dog")
     a = ap.parse_args()
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)

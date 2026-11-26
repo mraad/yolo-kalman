@@ -68,11 +68,15 @@ class Pipeline:
                                   classes=c.classes)
         self.enc = AppearanceEncoder(device=gpu) if c.use_reid else None
         self.paths = list(paths)
-        self.srcs = [open_source(p, gpu=gpu, chunk=c.chunk, prefer=c.decoder) for p in self.paths]
-        self.S = len(self.srcs)
-        self.results = [StreamResult(p, s.fps, s.hw) for p, s in zip(self.paths, self.srcs)]
-        self.tracker = MultiStreamTracker(self.S, [s.fps for s in self.srcs], c.tracker, device=gpu,
+        self.S = len(self.paths)
+        # Build (and CUDA-graph-capture) the tracker *before* any NVDEC decoder thread exists: decoder
+        # threads touching the legacy default stream would invalidate the capture.
+        self.tracker = MultiStreamTracker(self.S, 30.0, c.tracker, device=gpu,
                                           emb_dim=self.enc.dim if self.enc else 1)
+        self.srcs = [open_source(p, gpu=gpu, chunk=c.chunk, prefer=c.decoder) for p in self.paths]
+        for i, src in enumerate(self.srcs):
+            self.tracker.reset_stream(i, fps=src.fps)
+        self.results = [StreamResult(p, s.fps, s.hw) for p, s in zip(self.paths, self.srcs)]
         H, W = self.det.input_hw
         self.inbuf = torch.empty(self.S * c.chunk, 3, H, W, dtype=torch.float16, device=self.dev)
         self.lb = [letterbox_params(s.hw, (H, W)) for s in self.srcs]
@@ -109,13 +113,17 @@ class Pipeline:
         self._sync()
         t1 = time.perf_counter()
         n = np.array([0 if f is None else f.shape[0] for f in frames])
-        for i, f in enumerate(frames):
-            if f is not None:
-                letterbox_into(self.inbuf[i * T:i * T + f.shape[0]], f)
+        act = [i for i, f in enumerate(frames) if f is not None]   # finished streams are skipped
+        for k, i in enumerate(act):
+            letterbox_into(self.inbuf[k * T:k * T + frames[i].shape[0]], frames[i])
         self._sync()
         t2 = time.perf_counter()
-        d = self.det(self.inbuf)
+        d = self.det(self.inbuf[:len(act) * T])
         K = d.boxes.shape[1]
+        if len(act) < S:  # scatter back to the full [S*T] layout
+            idx = torch.as_tensor(act, device=self.dev)
+            full = lambda x: x.new_zeros(S, T, *x.shape[1:]).index_copy_(0, idx, x.view(len(act), T, *x.shape[1:]))
+            d = type(d)(*(full(x).flatten(0, 1) for x in (d.boxes, d.scores, d.cls, d.valid)))
         boxes = d.boxes.view(S, T, K, 4)
         # un-letterbox per stream (vectorised)
         r = torch.tensor([lb[0] for lb in self.lb], device=self.dev).view(S, 1, 1, 1)
@@ -237,4 +245,13 @@ class Pipeline:
                 raise err[0]
         torch.cuda.synchronize(self.dev)
         self.wall = time.perf_counter() - t0
+        self.close()
         return self.results
+
+    def close(self):
+        """Release the decoders (and their threads)."""
+        for s in self.srcs:
+            if hasattr(s, "_dec"):
+                s._dec = None
+        import gc
+        gc.collect()
