@@ -16,6 +16,12 @@ docs/img/strip_g120.jpg, scratch/*_peek.jpg, data/synth/*.json, data/synth/*.gt.
   Made from synthetic clips whose person cut-outs come from bus.jpg and
   zidane.jpg, assets of the ultralytics package (AGPL-3.0).
 
+docs/img/tracking.gif
+  Frames 881-1056 of "Traffic on Slovenska street" by Sounds of Changes, CC BY 3.0
+  (https://creativecommons.org/licenses/by/3.0/), via Wikimedia Commons:
+  https://commons.wikimedia.org/wiki/File:Traffic_on_Slovenska_street.webm
+  Changes: tracking boxes, ids and trails added, scaled to 480 px, 10 fps.
+
 docs/img/traffic.jpg
   Frame of "Traffic on Slovenska street" by Sounds of Changes, CC BY 3.0
   (https://creativecommons.org/licenses/by/3.0/), via Wikimedia Commons:
