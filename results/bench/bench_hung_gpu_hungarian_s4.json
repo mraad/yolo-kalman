@@ -1,0 +1,104 @@
+[
+ {
+  "streams": 4,
+  "gpus": [
+   0,
+   1
+  ],
+  "workers": 2,
+  "frames": 4800,
+  "wall_s": 1.434394913027063,
+  "fps_total": 3346.3587721950025,
+  "fps_per_stream": 836.5896930487506,
+  "per_gpu": {
+   "0": {
+    "gpu": 0,
+    "frames": 2400,
+    "wall": 1.434394913027063,
+    "timing": {
+     "decode": 0.10840910719707608,
+     "preprocess": 0.048064649337902665,
+     "detect": 0.8328332386445254,
+     "embed": 0.43475139420479536,
+     "track": 1.0294782975688577
+    },
+    "tracker": {
+     "gpu_pre": 0.16666902406886225,
+     "match": 0.27183603227138464,
+     "gpu_post": 0.38349331257492264,
+     "host": 0.9931246002670377,
+     "sync_wait": 0.55238172179088
+    },
+    "streams": 2,
+    "ids": [
+     56,
+     42
+    ]
+   },
+   "1": {
+    "gpu": 1,
+    "frames": 2400,
+    "wall": 1.4026183190289885,
+    "timing": {
+     "decode": 0.09342500241473317,
+     "preprocess": 0.03964607766829431,
+     "detect": 0.8319414940197021,
+     "embed": 0.42735025426372886,
+     "track": 1.004377658246085
+    },
+    "tracker": {
+     "gpu_pre": 0.1696442558951681,
+     "match": 0.28617596801370404,
+     "gpu_post": 0.3602096641659731,
+     "host": 0.9675654671154916,
+     "sync_wait": 0.5206120649818331
+    },
+    "streams": 2,
+    "ids": [
+     55,
+     2
+    ]
+   }
+  },
+  "nvml": [
+   {
+    "util_mean": 69.5,
+    "util_max": 78,
+    "nvdec_mean": 8.875,
+    "mem_max_gb": 6.167236328125,
+    "power_mean_w": 237.896
+   },
+   {
+    "util_mean": 61.375,
+    "util_max": 77,
+    "nvdec_mean": 8.875,
+    "mem_max_gb": 6.120361328125,
+    "power_mean_w": 223.370125
+   }
+  ],
+  "outer_wall_s": 1.55251145362854,
+  "tag": "hung_gpu_hungarian_s4",
+  "cfg": {
+   "engine": "models/yolo26m_384x640_b64_e2e_fp16.engine",
+   "chunk": 8,
+   "max_frames": 1200,
+   "use_reid": true,
+   "overlap": true,
+   "profile": false,
+   "classes": [
+    0,
+    1,
+    2,
+    3,
+    5,
+    7,
+    14,
+    15,
+    16
+   ],
+   "tracker": {
+    "assign": "gpu_hungarian"
+   }
+  }
+ }
+]

@@ -1,0 +1,100 @@
+[
+ {
+  "streams": 4,
+  "gpus": [
+   0,
+   1
+  ],
+  "workers": 2,
+  "frames": 4800,
+  "wall_s": 2.0407195040024817,
+  "fps_total": 2352.111591321451,
+  "fps_per_stream": 588.0278978303628,
+  "per_gpu": {
+   "1": {
+    "gpu": 1,
+    "frames": 2400,
+    "wall": 1.6960226399824023,
+    "timing": {
+     "decode": 0.08740718523040414,
+     "preprocess": 0.05194739392027259,
+     "detect": 0.8889998090453446,
+     "embed": 0.6489328425377607,
+     "track": 1.4612442911602557
+    },
+    "tracker": {
+     "gpu_pre": 0.43116440367884934,
+     "match": 0.7005282216705382,
+     "gpu_post": 0.2136607700958848
+    },
+    "streams": 2,
+    "ids": [
+     55,
+     2
+    ]
+   },
+   "0": {
+    "gpu": 0,
+    "frames": 2400,
+    "wall": 2.0407195040024817,
+    "timing": {
+     "decode": 0.08966589369811118,
+     "preprocess": 0.05601299740374088,
+     "detect": 0.8835803316906095,
+     "embed": 0.7145148690324277,
+     "track": 1.886615067254752
+    },
+    "tracker": {
+     "gpu_pre": 0.4238536211196333,
+     "match": 1.0807718203868717,
+     "gpu_post": 0.26258215215057135
+    },
+    "streams": 2,
+    "ids": [
+     56,
+     42
+    ]
+   }
+  },
+  "nvml": [
+   {
+    "util_mean": 45.72727272727273,
+    "util_max": 54,
+    "nvdec_mean": 6.0,
+    "mem_max_gb": 6.243408203125,
+    "power_mean_w": 207.67072727272728
+   },
+   {
+    "util_mean": 44.72727272727273,
+    "util_max": 61,
+    "nvdec_mean": 6.363636363636363,
+    "mem_max_gb": 6.122314453125,
+    "power_mean_w": 215.42322727272725
+   }
+  ],
+  "outer_wall_s": 2.1622605323791504,
+  "tag": "hung_lapjv_s4",
+  "cfg": {
+   "engine": "models/yolo26m_384x640_b64_e2e_fp16.engine",
+   "chunk": 8,
+   "max_frames": 1200,
+   "use_reid": true,
+   "overlap": true,
+   "profile": false,
+   "classes": [
+    0,
+    1,
+    2,
+    3,
+    5,
+    7,
+    14,
+    15,
+    16
+   ],
+   "tracker": {
+    "assign": "lapjv"
+   }
+  }
+ }
+]

@@ -1,0 +1,71 @@
+[
+ {
+  "streams": 1,
+  "gpus": [
+   0
+  ],
+  "workers": 1,
+  "frames": 1200,
+  "wall_s": 1.0737471368629485,
+  "fps_total": 1117.5815597570866,
+  "fps_per_stream": 1117.5815597570866,
+  "per_gpu": {
+   "0": {
+    "gpu": 0,
+    "frames": 1200,
+    "wall": 1.0737471368629485,
+    "timing": {
+     "decode": 0.061496656620875,
+     "preprocess": 0.027209158753976226,
+     "detect": 0.5540102198719978,
+     "embed": 0.4209041295107454,
+     "track": 0.6438969387672842
+    },
+    "tracker": {
+     "gpu_pre": 0.102067807916552,
+     "match": 0.1922332162931559,
+     "gpu_post": 0.20001920019090164,
+     "host": 0.6113350549712777,
+     "sync_wait": 0.2893447664100677
+    },
+    "streams": 1,
+    "ids": [
+     56
+    ]
+   }
+  },
+  "nvml": [
+   {
+    "util_mean": 48.42857142857143,
+    "util_max": 71,
+    "nvdec_mean": 4.0,
+    "mem_max_gb": 6.02764892578125,
+    "power_mean_w": 206.08971428571428
+   }
+  ],
+  "outer_wall_s": 1.3909001350402832,
+  "tag": "hung_gpu_hungarian_s1",
+  "cfg": {
+   "engine": "models/yolo26m_384x640_b64_e2e_fp16.engine",
+   "chunk": 8,
+   "max_frames": 1200,
+   "use_reid": true,
+   "overlap": true,
+   "profile": false,
+   "classes": [
+    0,
+    1,
+    2,
+    3,
+    5,
+    7,
+    14,
+    15,
+    16
+   ],
+   "tracker": {
+    "assign": "gpu_hungarian"
+   }
+  }
+ }
+]

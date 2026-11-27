@@ -43,3 +43,29 @@
 - [x] README (commands, results, licences)
 - [x] demo in tmux `tracker-demo` -> results/demo (12 overlays, exit 0, session closed)
 - [x] DONE summary
+
+## GPU Hungarian
+Decisions (made unattended):
+- Method: exact Hungarian / Kuhn-Munkres, shortest-augmenting-path form with dual potentials (Dijkstra
+  per row, e-maxx/JV family), as a custom CUDA kernel: one warp per stream problem, all streams in one
+  launch, data-dependent loops stay inside the kernel -> CUDA-graph capturable, sync-free.
+  A pure-PyTorch batched variant needs a host sync per Dijkstra step (data-dependent termination) ->
+  kept only as a reference/fallback and measured.
+- cost_limit semantics = lap's extend_cost: minimise sum(c_ij - limit) over matched pairs, so pairs
+  with c > limit are forbidden; implemented with n zero-cost dummy columns (row unmatched).
+- Whole cascade (S1..S5, new tracks, id recovery, bookkeeping) ported to GPU tensors for
+  assign="gpu_hungarian"; assign="lapjv" keeps the old CPU cascade byte-for-byte as the reference.
+- [x] CUDA kernel + torch custom op + torch fallback (torch variant measured 300x slower: host sync per Dijkstra step)
+- [x] solver tests vs scipy / lapjv (tests/test_assign.py, 7 tests)
+- [x] GPU cascade in tracker, assign option, equivalence vs lapjv path (frame-identical on synthetic scenes)
+- [x] async step (one sync per chunk) in pipeline
+- [x] CLI flags track.py / bench.py / eval_synth.py
+- [x] bench both solvers 1/4/8/16/32 streams, 2 GPUs (5,270 vs 3,164 fps at 16)
+- [x] README / CLAUDE.md / DONE_HUNGARIAN
+- [x] iterate: fusable KF (no 8x8 bmm), solver kernel shared-mem staging, split producer (reader + detector)
+- [x] found + fixed: NVDEC copy-out race (exposed by sync-free reader), benchmark lost-"done" hang
+- Decision: default assign="gpu_hungarian" (exact, output-identical to lapjv on synthetic suites, 1.4-1.7x faster end to end).
+- [x] real clips: recorded-input replay, every solver call vs lapjv: equal total cost 8,536/8,536, 222 tie
+  alternatives; full runs 591/595 ids (gpu) vs 619/601 (lapjv): run-to-run noise (pipeline not deterministic)
+- Not done: fused single-kernel cascade (next step if more tracker speed is needed under TRT contention);
+  root cause of 3 fast rc=1 benchmark failures right after the queue-flush fix not recorded.

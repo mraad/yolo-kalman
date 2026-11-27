@@ -1,0 +1,112 @@
+[
+ {
+  "streams": 16,
+  "gpus": [
+   0,
+   1
+  ],
+  "workers": 2,
+  "frames": 19200,
+  "wall_s": 6.0684477728791535,
+  "fps_total": 3163.906276957316,
+  "fps_per_stream": 197.74414230983226,
+  "per_gpu": {
+   "1": {
+    "gpu": 1,
+    "frames": 9600,
+    "wall": 5.704655930167064,
+    "timing": {
+     "decode": 0.5045419265516102,
+     "preprocess": 0.26498243934474885,
+     "detect": 0.3879911690019071,
+     "embed": 3.4060549326241016,
+     "track": 5.596901951357722
+    },
+    "tracker": {
+     "gpu_pre": 1.175671083619818,
+     "match": 3.3782454954925925,
+     "gpu_post": 0.9111451145727187
+    },
+    "streams": 8,
+    "ids": [
+     55,
+     2,
+     56,
+     42,
+     65,
+     55,
+     2,
+     56
+    ]
+   },
+   "0": {
+    "gpu": 0,
+    "frames": 9600,
+    "wall": 6.0684477728791535,
+    "timing": {
+     "decode": 0.4628312278073281,
+     "preprocess": 0.29463601391762495,
+     "detect": 0.3964643308427185,
+     "embed": 3.382335255621001,
+     "track": 5.959886869415641
+    },
+    "tracker": {
+     "gpu_pre": 1.1241280979011208,
+     "match": 3.836204348830506,
+     "gpu_post": 0.8719329677987844
+    },
+    "streams": 8,
+    "ids": [
+     56,
+     42,
+     65,
+     55,
+     2,
+     56,
+     42,
+     65
+    ]
+   }
+  },
+  "nvml": [
+   {
+    "util_mean": 58.34375,
+    "util_max": 81,
+    "nvdec_mean": 7.5625,
+    "mem_max_gb": 8.13330078125,
+    "power_mean_w": 300.26746875
+   },
+   {
+    "util_mean": 54.84375,
+    "util_max": 75,
+    "nvdec_mean": 7.84375,
+    "mem_max_gb": 8.13134765625,
+    "power_mean_w": 311.570046875
+   }
+  ],
+  "outer_wall_s": 6.332587718963623,
+  "tag": "final_lapjv_s16",
+  "cfg": {
+   "engine": "models/yolo26m_384x640_b64_e2e_fp16.engine",
+   "chunk": 8,
+   "max_frames": 1200,
+   "use_reid": true,
+   "overlap": true,
+   "profile": false,
+   "classes": [
+    0,
+    1,
+    2,
+    3,
+    5,
+    7,
+    14,
+    15,
+    16
+   ],
+   "tracker": {
+    "assign": "lapjv"
+   }
+  }
+ }
+]

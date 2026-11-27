@@ -14,9 +14,16 @@ re-ID tracker in PyTorch, batched over streams. See README.md for results and co
 ## Layout
 - `src/yolo_kalman/kalman.py` batched CV KF (cx,cy,w,h), NSA R, `predict_dt` (exact multi-step),
   unrolled 4x4 Cholesky (`UNROLLED_4X4`, switched on by the tracker when `compile=True`).
-- `src/yolo_kalman/tracker.py` `MultiStreamTracker`: fixed [S,M] slot tensors on GPU, two CUDA
-  graphs per step (`_pre`: predict + all cost terms → pinned host; `_post`: dense masked update,
-  ORU, init, EMA). CPU does the matching cascade (lap.lapjv) + int bookkeeping. One sync per graph.
+- `src/yolo_kalman/assign.py` batched exact Hungarian (shortest augmenting path + duals) CUDA kernel,
+  one block per stream; torch custom op `yolo_kalman::lap_batch(cost[B,R,C], row_mask, col_mask, limit)`
+  = lap.lapjv(extend_cost=True, cost_limit) semantics; JIT-built via load_inline (needs nvcc in
+  /usr/local/cuda + ninja from the venv; cache ~/.cache/torch_extensions). `lap_batch_torch` = fallback.
+- `src/yolo_kalman/tracker.py` `MultiStreamTracker`: fixed [S,M] slot tensors on GPU.
+  `assign="gpu_hungarian"` (default): cascade + bookkeeping on GPU (`g_*` tensors), 3 CUDA graphs per
+  step (gpre / gmatch / gpost), `submit()` + `collect()` = one sync per batch of steps.
+  `assign="lapjv"`: reference path, 2 graphs (`_pre` / `_post`) + CPU cascade with lap.lapjv, numpy
+  bookkeeping, one sync per graph. Both paths must stay output-identical
+  (`tests/test_synthetic.py::test_gpu_hungarian_cascade_matches_lapjv`): change cascade logic in both.
 - `detector.py` `Detector` protocol + `TRTYolo` (TensorRT, own runner, reads the Ultralytics
   metadata prefix) + `TorchYolo` fallback; `postprocess_e2e` (NMS-free YOLO26) / `postprocess_raw`.
 - `decode.py` NVDEC (`PyNvVideoCodec.ThreadedDecoder`) / OpenCV fallback; `preprocess.py` GPU letterbox.
@@ -31,8 +38,17 @@ re-ID tracker in PyTorch, batched over streams. See README.md for results and co
   the legacy stream invalidate captures); capture uses `capture_error_mode="thread_local"`.
 - Anything inside `_pre_core/_post_impl` must be shape-static, sync-free (no `.item()`, no
   `nonzero`, `cholesky_ex` not `cholesky`), and must not create CPU tensors (inductor + graphs).
-- Changing tracker GPU code → run `tests/test_synthetic.py::test_cuda_graph_compiled_matches_eager`.
+- Changing tracker GPU code → run `tests/test_synthetic.py::test_cuda_graph_compiled_matches_eager`
+  (both assign modes) and `test_gpu_hungarian_cascade_matches_lapjv`.
+- KF uses element-wise block formulas (no batched 8x8 matmuls) so inductor fuses it; keep it that way.
 - Unit tests use `compile=False` (inductor compile ~30 s per new shape; cached in /tmp afterwards).
+- NvDecSource.read syncs after the copy out of the decoder pool: the reader thread never syncs otherwise
+  and the decoder recycles surfaces (corrupted frames without it). Keep it.
+- bench workers must `q.close(); q.join_thread()` before exiting (lost "done" message = parent hang).
+- Pipeline output is not bit-deterministic run to run (detector/embedding numerics); compare solvers
+  with recorded-input replays (`scratch/real_replay.py`), not two pipeline runs.
+- First tracker construction per new [S] shape compiles ~30-60 s; warm the cache with
+  `scratch/warm.py` before multi-worker benchmarks.
 - Multiple tracker processes per GPU do **not** help (GPU time-slicing between contexts, no MPS).
 - Engines: `models/yolo26m_384x640_b64_e2e_fp16.engine` (default, NMS-free) and `..._b64_fp16.engine`
   (raw head + GPU NMS). Rebuild: `cd models && ../run.sh ../scripts/export_trt.py yolo26m.pt --nms-free`.

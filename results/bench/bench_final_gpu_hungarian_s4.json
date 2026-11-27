@@ -1,0 +1,104 @@
+[
+ {
+  "streams": 4,
+  "gpus": [
+   0,
+   1
+  ],
+  "workers": 2,
+  "frames": 4800,
+  "wall_s": 1.301552782068029,
+  "fps_total": 3687.9026852628367,
+  "fps_per_stream": 921.9756713157092,
+  "per_gpu": {
+   "0": {
+    "gpu": 0,
+    "frames": 2400,
+    "wall": 1.2896086659748107,
+    "timing": {
+     "decode": 0.12236260296776891,
+     "preprocess": 0.05842691310681403,
+     "detect": 0.5260959137231112,
+     "embed": 0.7407492762431502,
+     "track": 0.9835372432135046
+    },
+    "tracker": {
+     "gpu_pre": 0.18852671962603915,
+     "match": 0.3005573122352365,
+     "gpu_post": 0.28583315226435646,
+     "host": 0.9506251700222492,
+     "sync_wait": 0.48998410417698324
+    },
+    "streams": 2,
+    "ids": [
+     56,
+     42
+    ]
+   },
+   "1": {
+    "gpu": 1,
+    "frames": 2400,
+    "wall": 1.301552782068029,
+    "timing": {
+     "decode": 0.12216445407830179,
+     "preprocess": 0.05924927722662687,
+     "detect": 0.537442282307893,
+     "embed": 0.7399056360591203,
+     "track": 0.9621412395499647
+    },
+    "tracker": {
+     "gpu_pre": 0.18333440009132035,
+     "match": 0.28071568015217774,
+     "gpu_post": 0.28332959988713274,
+     "host": 0.9283003706950694,
+     "sync_wait": 0.4619373409077525
+    },
+    "streams": 2,
+    "ids": [
+     55,
+     2
+    ]
+   }
+  },
+  "nvml": [
+   {
+    "util_mean": 69.93333333333334,
+    "util_max": 85,
+    "nvdec_mean": 9.2,
+    "mem_max_gb": 6.245361328125,
+    "power_mean_w": 261.57546666666667
+   },
+   {
+    "util_mean": 63.13333333333333,
+    "util_max": 82,
+    "nvdec_mean": 9.066666666666666,
+    "mem_max_gb": 6.247314453125,
+    "power_mean_w": 231.95973333333333
+   }
+  ],
+  "outer_wall_s": 1.4531221389770508,
+  "tag": "final_gpu_hungarian_s4",
+  "cfg": {
+   "engine": "models/yolo26m_384x640_b64_e2e_fp16.engine",
+   "chunk": 8,
+   "max_frames": 1200,
+   "use_reid": true,
+   "overlap": true,
+   "profile": false,
+   "classes": [
+    0,
+    1,
+    2,
+    3,
+    5,
+    7,
+    14,
+    15,
+    16
+   ],
+   "tracker": {
+    "assign": "gpu_hungarian"
+   }
+  }
+ }
+]

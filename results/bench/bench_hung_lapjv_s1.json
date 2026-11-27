@@ -1,0 +1,69 @@
+[
+ {
+  "streams": 1,
+  "gpus": [
+   0
+  ],
+  "workers": 1,
+  "frames": 1200,
+  "wall_s": 1.430008745053783,
+  "fps_total": 839.1557073693754,
+  "fps_per_stream": 839.1557073693754,
+  "per_gpu": {
+   "0": {
+    "gpu": 0,
+    "frames": 1200,
+    "wall": 1.430008745053783,
+    "timing": {
+     "decode": 0.06172378268092871,
+     "preprocess": 0.03528291592374444,
+     "detect": 0.6058912661392242,
+     "embed": 0.6783816199749708,
+     "track": 1.3053720437455922
+    },
+    "tracker": {
+     "gpu_pre": 0.34866355336271226,
+     "match": 0.6913980792742223,
+     "gpu_post": 0.16391216055490077
+    },
+    "streams": 1,
+    "ids": [
+     56
+    ]
+   }
+  },
+  "nvml": [
+   {
+    "util_mean": 35.22222222222222,
+    "util_max": 50,
+    "nvdec_mean": 3.111111111111111,
+    "mem_max_gb": 6.02960205078125,
+    "power_mean_w": 173.68483333333333
+   }
+  ],
+  "outer_wall_s": 1.7197387218475342,
+  "tag": "hung_lapjv_s1",
+  "cfg": {
+   "engine": "models/yolo26m_384x640_b64_e2e_fp16.engine",
+   "chunk": 8,
+   "max_frames": 1200,
+   "use_reid": true,
+   "overlap": true,
+   "profile": false,
+   "classes": [
+    0,
+    1,
+    2,
+    3,
+    5,
+    7,
+    14,
+    15,
+    16
+   ],
+   "tracker": {
+    "assign": "lapjv"
+   }
+  }
+ }
+]

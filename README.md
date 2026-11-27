@@ -21,8 +21,73 @@ streams:
   weights are person-only (we also track vehicles/animals), distributed via Google Drive, and torchreid
   is unmaintained on PyPI. A generic class-agnostic descriptor installs from the PyTorch index. It sits
   behind a one-method interface (`reid.AppearanceEncoder`), so a proper re-ID net can replace it.
-* **Assignment**: all cost matrices are computed on the GPU. The rectangular assignment uses `lap.lapjv`
-  on the CPU (measured below: this CPU part is now the throughput limiter at ≥8 streams/GPU).
+* **Assignment**: all cost matrices are computed on the GPU, and by default the whole matching cascade
+  runs there too, using a **batched exact GPU Hungarian solver** (see next section). The previous CPU
+  cascade with `lap.lapjv` is kept as the reference (`TrackerConfig(assign="lapjv")`, `--assign lapjv`).
+
+## Assignment: batched GPU Hungarian (`assign.py`)
+**Method.** Exact Hungarian / Kuhn–Munkres in its *shortest augmenting path* form with row/column dual
+potentials (the Jonker–Volgenant family; the classical O(n²·m) "insert one row, Dijkstra on reduced
+costs, update duals, flip the path" formulation). It is not an auction or epsilon method, has no
+iteration cap, and keeps complementary slackness after every augmentation, so the result is an optimal
+assignment. Duals are float64; costs are the same float32 values the lapjv path sees.
+
+**cost_limit semantics.** `lap.lapjv(c, extend_cost=True, cost_limit=L)` solves an (R+C)×(R+C)
+extended problem where every row or column may stay unmatched at cost L/2. Its optimum equals
+`min Σ_matched (c_ij − L) + L(R+C)/2`. So pairs with `c > L` are never matched (forbidden here), and
+pairs with `c == L` tie with "unmatched" (here they are matched). The kernel solves the equivalent
+n×(m+n) problem: compacted rows × (real columns with cost c−L, then n zero-cost dummy columns =
+"row unmatched"). Rows and columns without any allowed pair are dropped first. Padding is handled with
+masks: each stream's live tracks and still-free detections are `row_mask [S,M]` / `col_mask [S,N]`
+over the fixed padded `[S,M,N]` cost tensor.
+
+**Kernel.** One thread block per stream, so all streams are solved in one launch. 256 threads find
+the allowed rows/columns (one coalesced pass) and stage the compacted sub-matrix in shared memory.
+Then one warp runs the search: columns are strided over the lanes, and the Dijkstra arg-min is a
+warp-shuffle reduction where ties go to the lowest column index (deterministic). All data-dependent
+loops live inside the kernel, so a solve is one fixed launch: it can be captured in a CUDA graph and
+needs no host sync. It is registered as the torch custom op `yolo_kalman::lap_batch`, so
+`torch.compile` traces the cascade around it. The kernel is JIT-built with `torch.utils.cpp_extension`
+(nvcc, cached in `~/.cache/torch_extensions`).
+
+**Why a CUDA kernel (measured).** `lap_batch_torch` is the same algorithm vectorised over streams in
+plain PyTorch. Its loop length depends on the data, so it needs a host sync per Dijkstra step: 49 ms
+for 8×(20×20) and 171 ms for 16×(40×40) dense random problems, against 0.15 / 0.57 ms for the CUDA
+kernel and 0.14 / 0.54 ms for lapjv. It is kept as the CPU fallback and as a second reference in the
+tests. I did not try Triton: the search is scalar pointer-chasing (path back-tracking, a single "current
+row"), which fits a warp-synchronous CUDA loop better than Triton's block programming model. On
+tracking-like sparse costs (true pair cheap, three plausible distractors per row, the rest gated), one
+launch for all streams against lapjv called per stream in a Python loop:
+
+| streams × rows × cols | GPU Hungarian (one launch) | lapjv (per stream, CPU) |
+|---|---|---|
+| 8 × 20 × 20 | 0.038 ms | 0.148 ms |
+| 16 × 30 × 30 | 0.054 ms | 0.381 ms |
+| 16 × 60 × 60 | 0.155 ms | 0.918 ms |
+| 32 × 40 × 40 | 0.084 ms | 1.048 ms |
+| 32 × 150 × 150 | 0.879 ms | 9.780 ms |
+
+(`scratch/try_lap2.py`, including launch overhead, outside CUDA graphs. Inside the tracker graph a
+solve costs about 7.5 µs.)
+
+**Exactness evidence.** (1) The algorithm is exact: no epsilon, no iteration cap, float64 duals.
+(2) `tests/test_assign.py`: total cost equals scipy `linear_sum_assignment` on the explicit extended
+matrix *and* lapjv for random rectangular problems (1–47 rows/cols, 0/50/90% gated, ties, limits
+0.25–1.5), for 1×N, N×1, empty, all-gated, values at the limit, 3e38 / 6.55e4 entries, NaN/inf (never
+matched) and integer costs with many ties. Also: 32 mixed-size streams in one padded [32,160,160]
+batch, identical answers on repeated calls (deterministic ties), CUDA-graph replay and torch.compile.
+(3) Tracker: frame-identical output to the lapjv cascade on the synthetic scenes; on real-clip
+replays, equal total cost in 8,536/8,536 problems (below).
+
+**Cascade on the GPU.** With `assign="gpu_hungarian"` the five stages S1–S5, track birth (the k-th
+leftover detection goes to the k-th free slot, via cumsum ranks), id recovery and all per-track
+bookkeeping (state, ids, ages, hits, size reference, embedding EMA weights) are GPU tensors. One
+tracker step is 3 CUDA graphs: *pre* (predict + cost terms), *match* (cascade: 6 solver launches plus
+fused element-wise code), and *post* (KF update / ORU / init / EMA + output packing). There are no host
+syncs inside a step. `submit()` enqueues a step and `collect()` syncs once for all pending steps, so the
+pipeline syncs once per chunk of 8 frames instead of twice per frame. The cost terms go through the
+same fp16 rounding as the lapjv path. As a result the GPU cascade reproduces the lapjv cascade frame
+for frame on the synthetic test scenes (identical ids, boxes and counters: `test_gpu_hungarian_cascade_matches_lapjv`).
 
 ## GPU pipeline (`pipeline.py`)
 ```
@@ -31,11 +96,12 @@ NVDEC (PyNvVideoCodec ThreadedDecoder, frames stay in device memory, DLPack -> t
  -> TensorRT FP16 YOLO26m, NMS-free end2end head [B,150,6] (no host sync)  (one batched call)
  -> un-letterbox, RoI-align crops -> ResNet-18 fp16 embeddings (one call for all streams)
  -> tracker step per frame for all S streams at once:
-      CUDA graph A (predict + all cost terms -> pinned host) -> CPU cascade (lapjv) ->
-      CUDA graph B (masked KF update / ORU / init / EMA -> pinned host)
+      CUDA graph pre (predict + all cost terms) -> graph match (cascade, batched GPU Hungarian) ->
+      graph post (masked KF update / ORU / init / EMA) -> pinned ring; one host sync per chunk
+      (--assign lapjv: graph A -> pinned host -> CPU cascade with lapjv -> graph B, 2 syncs/frame)
 ```
-The producer (decode/detect/embed) runs in its own thread on a low-priority CUDA stream. The tracker
-runs on a high-priority stream. The tracker's dense GPU code is `torch.compile`d (inductor) and then
+A reader thread (decode + letterbox, double-buffered) and a detector thread (TRT + embed) run on
+low-priority CUDA streams. The tracker runs on a high-priority stream. The tracker's dense GPU code is `torch.compile`d (inductor) and then
 captured in CUDA graphs, with an element-wise 4×4 Cholesky so inductor can fuse it. On 16 streams this
 cut tracker GPU time per step from 1.65 ms to 0.5 ms. Images never leave the GPU (only the optional
 overlay writer downloads frames).
@@ -59,11 +125,11 @@ dropped in. I did not build one; see "not done".
 ./run.sh scripts/download_clips.py                     # Wikimedia 480p VP9 transcodes -> clips/ (untrusted data)
 cd models && ../run.sh ../scripts/export_trt.py yolo26m.pt --nms-free && cd ..   # TRT FP16 engine
 ./run.sh scripts/make_synthetic.py                     # synthetic occlusion clips + GT -> data/synth
-./run.sh -m pytest -q                                  # 14 tests (KF vs NumPy, synthetic scenes, e2e)
-./run.sh scripts/eval_synth.py --overlay               # HOTA/IDF1/IDSW + ablations -> results/synth
+./run.sh -m pytest -q                                  # 24 tests (KF, solver vs scipy/lapjv, synthetic, e2e)
+./run.sh scripts/eval_synth.py --overlay               # HOTA/IDF1/IDSW + ablations -> results/synth (--assign lapjv)
 ./run.sh scripts/track.py clips/*.webm --out results/real --overlay   # all clips as parallel streams
-./run.sh scripts/bench.py --streams 1 4 8 16 --gpus 0 1 --frames 1200 # throughput + NVML sampling
-./run.sh scripts/bench_table.py "twogpu_s*"            # markdown table from bench JSONs
+./run.sh scripts/bench.py --streams 1 4 8 16 32 --gpus 0 1 --frames 1200 --assign gpu_hungarian  # or --assign lapjv
+./run.sh scripts/bench_table.py "final_gpu_hungarian_s*"   # markdown table from bench JSONs
 ```
 `run.sh` = `.venv/bin/python -I` with `LD_LIBRARY_PATH` unset. The host path puts cuDNN 9.20 ahead of
 the venv's 9.24, which breaks every conv.
@@ -107,6 +173,10 @@ full occlusion. Gaps of 60 frames or more fail, because people do not reappear e
 constant-velocity model puts them when their box was partially eroded before vanishing. The
 ByteTrack-like baseline fails from 30 frames on.
 
+Re-run after the GPU Hungarian change (`results/synth/metrics.md` = `--assign gpu_hungarian`,
+`metrics_lapjv.md` = `--assign lapjv`): both tables are identical to each other and to the table above,
+for every variant and clip.
+
 Unit tests with simulated detections (`tests/test_synthetic.py`) cover gaps of 10/30/60/120 frames
 (4 scenes as 4 batched streams, with and without re-ID), a speed change behind the occluder (needs
 re-ID), crossings with no swap, clutter (HOTA > 0.7, IDF1 > 0.85, IDSW = 0), and CUDA-graph/compiled
@@ -136,30 +206,66 @@ Overlays with ids and trails: `results/real/*_tracks.mp4` and `results/demo/` (n
 | Traffic_on_Slovenska_street_2.webm | CC BY 3.0 | 466 | 22 | 32 | 15 / 17 | 79 / 55 | 12 / 11 | 77 |
 | **total** | | 24837 | **603** | 833 | | | 510 / 237 | |
 
+**GPU Hungarian vs lapjv on real data.** I recorded the tracker inputs of 300 frames × 12 clips once and
+replayed the identical inputs through both trackers (`scratch/real_replay.py`,
+`scratch/real_solver_check.py`). Every one of the 8,536 non-empty assignment problems the GPU cascade
+solved was re-solved with lapjv: **total cost equal in 8,536/8,536 (max difference 0.0)**. In 222
+(2.6%) the two solvers return different optimal assignments (ties: fp16-quantised costs make equal
+totals common). Track outcomes over the replay: 227 unique ids for both, ids differ in 1 of ~3,450
+stream-frames, and one extra S4 re-ID match (176 vs 175). A "strict" variant that leaves pairs with
+`c == cost_limit` unmatched is much further from lapjv (154 stream-frames with different ids), so
+lapjv evidently matches at equality, as the kernel does. Full runs (`scripts/track.py`, all frames,
+new code): lapjv 619 / 601 ids in two runs (509 / 504 re-acquisitions ≥1 s), gpu_hungarian 591 / 595
+ids (520 / 508). The spread between runs of the *same* solver is as large as the difference between
+solvers.
+
 Tracker counters for the full run: 3,291 ORU re-updates, 1,217 appearance re-IDs (S4), 729 OCR
 matches, 175 young-track id recoveries, 0 dropped detections, 0 slot overflows.
 
 ### Throughput (end-to-end: NVDEC → TRT → re-ID → tracker, no overlay)
 `scripts/bench.py`: the 5 longest clips repeated round-robin, 1,200 frames per stream, one worker
-process per GPU (streams split across GPU 0/1). NVML is sampled every 100 ms during the run. The time
-split is the per-worker sum of stage wall time. Producer (decode/letterbox/detect/embed) and consumer
-(track) overlap, so the columns add up to more than the wall time.
+process per GPU (streams split across GPU 0/1). NVML is sampled every 100 ms during the run. Stage
+columns are per-worker sums of wall time. Reader (decode/letterbox), detector (TRT/embed) and tracker
+threads overlap, so the columns add up to more than the wall time. Same code for both rows, only
+`--assign` differs (final runs: `bench_final_*`).
 
-| streams | GPUs | frames | wall s | FPS total | FPS/stream | GPU util % (mean per GPU) | NVDEC % | decode s | letterbox s | detect s | embed s | track s | tracker GPU-pre / CPU-match / GPU-post s |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| 1 | 1 | 1200 | 1.4 | 845 | 845 | 40 | 3 | 0.05 | 0.03 | 0.59 | 0.64 | 1.30 | 0.36 / 0.65 / 0.20 |
-| 4 | 2 | 4800 | 2.1 | 2268 | 567 | 47 / 45 | 6 / 6 | 0.09 | 0.06 | 0.88 | 0.69 | 1.81 | 0.50 / 0.88 / 0.31 |
-| 8 | 2 | 9600 | 3.6 | 2669 | 334 | 51 / 48 | 7 / 7 | 0.18 | 0.09 | 1.59 | 0.76 | 3.36 | 0.59 / 1.86 / 0.72 |
-| 16 | 2 | 19200 | 6.4 | 3015 | 188 | 55 / 54 | 7 / 7 | 0.35 | 0.27 | 3.05 | 0.85 | 6.06 | 0.86 / 3.35 / 1.65 |
-| 32 | 2 | 38400 | 10.9 | 3519 | 110 | 60 / 61 | 8 / 8 | 0.69 | 0.57 | 6.05 | 0.89 | 10.65 | 1.31 / 6.61 / 2.53 |
+**Tracker split.** For `gpu_hungarian` the three numbers are **GPU time** between CUDA events around the
+three graphs (pre / match / post). They include time the tiny tracker kernels spend waiting for SMs
+occupied by TensorRT. Alone, one step for 8 streams takes 0.07 / 0.11 / 0.12 ms. For `lapjv` they are
+host wall time (graph A + sync / CPU cascade / graph B + sync).
 
-Two worker processes per GPU (`--wpg 2`):
+**Default, `--assign gpu_hungarian`:**
 
-| streams | GPUs | frames | wall s | FPS total | FPS/stream | GPU util % (mean per GPU) | NVDEC % | decode s | letterbox s | detect s | embed s | track s | tracker GPU-pre / CPU-match / GPU-post s |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| 16 | 2 | 19200 | 5.7 | 3378 | 211 | 93 / 91 | 10 / 10 | 0.56 | 0.57 | 2.89 | 0.74 | 5.09 | 1.82 / 1.81 / 1.23 |
-| 32 | 2 | 38400 | 11.2 | 3432 | 107 | 94 / 92 | 10 / 10 | 1.27 | 1.51 | 7.37 | 0.66 | 9.33 | 3.55 / 3.47 / 1.99 |
+| solver | streams | GPUs | frames | wall s | FPS total | FPS/stream | GPU util % (mean per GPU) | NVDEC % | decode s | letterbox s | detect s | embed s | track s | tracker pre / match / post s |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| gpu_hungarian | 1 | 1 | 1200 | 1.0 | 1233 | 1233 | 45 | 4 | 0.08 | 0.03 | 0.37 | 0.58 | 0.61 | 0.09 / 0.18 / 0.20 |
+| gpu_hungarian | 4 | 2 | 4800 | 1.3 | 3688 | 922 | 70 / 63 | 9 / 9 | 0.12 | 0.06 | 0.53 | 0.74 | 0.97 | 0.19 / 0.29 / 0.28 |
+| gpu_hungarian | 8 | 2 | 9600 | 2.1 | 4545 | 568 | 81 / 77 | 13 / 12 | 0.32 | 0.18 | 1.07 | 1.00 | 1.78 | 0.48 / 0.47 / 0.46 |
+| gpu_hungarian | 16 | 2 | 19200 | 3.6 | 5270 | 329 | 84 / 83 | 14 / 14 | 0.86 | 0.49 | 2.36 | 1.25 | 3.44 | 0.63 / 1.13 / 1.14 |
+| gpu_hungarian | 32 | 2 | 38400 | 6.7 | 5702 | 178 | 92 / 91 | 15 / 16 | 1.58 | 0.42 | 4.35 | 2.32 | 5.72 | 1.39 / 1.70 / 1.95 |
 
+**Reference, `--assign lapjv`** (same pipeline, CPU cascade):
+
+| solver | streams | GPUs | frames | wall s | FPS total | FPS/stream | GPU util % (mean per GPU) | NVDEC % | decode s | letterbox s | detect s | embed s | track s | tracker pre / match / post s |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| lapjv | 1 | 1 | 1200 | 1.4 | 883 | 883 | 42 | 4 | 0.06 | 0.03 | 0.32 | 0.85 | 1.26 | 0.34 / 0.67 / 0.15 |
+| lapjv | 4 | 2 | 4800 | 2.0 | 2448 | 612 | 47 / 45 | 6 / 6 | 0.11 | 0.07 | 0.46 | 1.06 | 1.68 | 0.44 / 0.91 / 0.22 |
+| lapjv | 8 | 2 | 9600 | 3.3 | 2879 | 360 | 53 / 51 | 7 / 7 | 0.21 | 0.13 | 0.40 | 1.91 | 3.09 | 0.69 / 1.84 / 0.45 |
+| lapjv | 16 | 2 | 19200 | 6.1 | 3164 | 198 | 58 / 55 | 8 / 8 | 0.48 | 0.28 | 0.39 | 3.39 | 5.78 | 1.15 / 3.61 / 0.89 |
+| lapjv | 32 | 2 | 38400 | 9.9 | 3870 | 121 | 66 / 68 | 10 / 10 | 1.00 | 0.50 | 0.76 | 5.99 | 9.69 | 1.44 / 6.75 / 1.37 |
+
+| streams | 1 | 4 | 8 | 16 | 32 |
+|---|---|---|---|---|---|
+| FPS gpu_hungarian | 1,233 | 3,688 | 4,545 | 5,270 | 5,702 |
+| FPS lapjv | 883 | 2,448 | 2,879 | 3,164 | 3,870 |
+| speed-up | 1.40× | 1.51× | 1.58× | 1.67× | 1.47× |
+| previous README (lapjv, single producer thread) | 845 | 2,268 | 2,669 | 3,015 | 3,519 |
+
+The tracker alone (`scratch/prof_trk.py`, 8 streams, synthetic detections with clutter, compiled + CUDA
+graphs) takes **0.40 ms per step with the GPU cascade vs 2.09 ms with lapjv**. GPU split: 0.07 ms pre,
+0.11 ms match (6 Hungarian launches ≈ 45 µs), 0.12 ms post.
+
+Earlier two-workers-per-GPU runs (`--wpg 2`, lapjv, before this change): 3,378 fps (16) / 3,432 (32).
 
 **Bottleneck analysis (iterations, in order):**
 1. Eager tracker with per-track ORU loop: 158 fps for 1 stream, 533 fps for 8 streams on 1 GPU. GPU was
@@ -169,16 +275,41 @@ Two worker processes per GPU (`--wpg 2`):
 3. Batched embeddings across streams (embed time 3.2 s → 0.4 s) and NMS-free YOLO26 head (no host
    sync): 1,554 fps for 16 streams on 1 GPU.
 4. `torch.compile` + unrolled 4×4 Cholesky inside the graphs, and a high-priority tracker stream:
-   1,943 fps for 16 streams on 1 GPU; **3,015 fps (16 streams) / 3,519 fps (32 streams) on 2 GPUs**.
-5. Now `track ≈ wall`: the consumer thread is the limiter. Of that time, the CPU matching cascade
-   (lapjv + NumPy bookkeeping, ~0.2 ms per stream per frame) is the largest part. The rest is waiting
-   on the two graph syncs while the GPU is busy with TensorRT. The detector alone could do about 3,300
-   img/s per GPU, so the end-to-end ceiling would be about 6,600 fps on 2 GPUs; we reach 53%.
-   NVML "utilisation" is 55–60% with one worker per GPU. Two workers per GPU push NVML util to 93%
-   but gain only 12% at 16 streams and nothing at 32: without MPS the processes time-slice the GPU,
-   and every tracker step has two blocking syncs. Next steps that would help (not done): a GPU
-   auction/greedy assignment so the cascade stays on the GPU, pipelining two stream groups so one
-   group's CPU matching overlaps the other's graphs, or MPS.
+   1,943 fps for 16 streams on 1 GPU; 3,015 fps (16 streams) / 3,519 fps (32 streams) on 2 GPUs.
+   Then `track ≈ wall`: the consumer was the limiter, mostly the CPU lapjv cascade (~0.2 ms per stream
+   per frame) plus two blocking graph syncs per frame. NVML util 55–61%.
+5. **GPU Hungarian + GPU cascade** (this change): matching never leaves the GPU, there are 3 graphs per
+   step, and one host sync per chunk of 8 frames (`submit`/`collect`). First version: 4,655 fps at 16
+   streams. Profiling the tracker alone showed 218 kernels per step, with ~35 batched 8×8 matmuls (KF
+   predict/update/ORU) and 6 solver launches at ~20 µs each.
+6. KF predict/update rewritten block-wise / element-wise, so inductor fuses them (178 kernels per step).
+   The embedding-distance matmul is fp16 on tensor cores. The solver kernel now compacts with all 256
+   threads and stages the sub-matrix in shared memory (20 → 7.5 µs per launch). Tracker step:
+   0.66 → 0.40 ms. End to end: 4,751 fps (16) / 5,245 fps (32). Now `track < wall` at 32 streams, and
+   the single producer thread (decode → letterbox → TRT → embed, serial) was the limiter.
+7. Producer split into a reader thread (NVDEC + letterbox into one of two input buffers) and a detector
+   thread (TRT + embed). The per-chunk un-letterbox constants are built once (each pageable
+   `torch.tensor(..., device=cuda)` blocked until TRT finished). Result: **5,270 fps (16) / 5,702 fps
+   (32), NVML util 84–92%**. This exposed a latent race: the NVDEC copy-out is async and the decoder
+   recycles its surfaces, which the old per-chunk syncs had hidden. Fixed by a sync after copy-out in
+   the reader thread.
+8. **Where it stands now.** At 16 streams `track` (3.44 s) ≈ wall (3.6 s) again, but the tracker
+   segments are GPU time inflated by contention: the same step takes 0.4 ms alone and ~2.4 ms while
+   TensorRT saturates the SMs. NVML util is 84–92%. TRT alone runs at ~3,300 img/s per GPU (6,600 fps
+   on 2 GPUs). We reach 80% (16 streams) to 86% (32) of that, with re-ID and tracking sharing the same
+   GPU. Remaining headroom is small and would need fewer, larger tracker kernels (e.g. a fused
+   CUDA cascade kernel) or running the tracker on a different GPU/MPS partition than TRT.
+
+**Benchmark hang (fixed).** The intermittent 2-GPU hang blamed on concurrent inductor compiles earlier
+was really a lost result message. A worker sometimes exited before its multiprocessing queue feeder
+thread flushed the final "done", and the parent waited forever. The worker now flushes the queue
+(`q.close(); q.join_thread()`), and the parent fails fast if every worker has exited without a
+result. In the grid where this was diagnosed, 3 first attempts hung (stack inspection: workers gone,
+parent polling the queue). After the fix, 3 first attempts in the same grid still failed *fast* with
+rc=1 and passed on retry. Their logs were overwritten, so the cause is not recorded; it may be the new
+"results missing" check firing. All later runs passed on the first try: two complete grids (20 runs)
+plus 3 repeated 8-stream runs. So the hang is fixed or at least turned into a fast, retryable failure,
+but I have not proven the root cause.
 
 ## Licences
 * **Ultralytics YOLO26 / `ultralytics` package: AGPL-3.0** (accepted for this project). Anything that
@@ -200,3 +331,15 @@ Two worker processes per GPU (`--wpg 2`):
   confused. The S4/recovery stages are gated by Mahalanobis distance and class group to limit this.
 * HOTA is a re-implementation, not TrackEval itself.
 * Ids are unique per stream, not globally.
+* GPU Hungarian: exactness is tested in total cost against scipy and lapjv (random and edge-case
+  problems) and by frame-identical tracker output against the lapjv path. Where several optimal
+  assignments exist, its tie-breaking (lowest column index, `c == cost_limit` counts as matched) can
+  differ from lapjv's; none of the synthetic suites contains such a case that changes ids.
+* The GPU cascade always runs the ORU branch of the post graph (masked per slot). The lapjv path only
+  runs it on frames that need it.
+* The CUDA kernel is JIT-built on first use (≈40 s, needs nvcc from /usr/local/cuda). Without CUDA,
+  `lap_batch` falls back to the pure-PyTorch implementation, which is slow.
+* The end-to-end pipeline is not bit-deterministic run to run (lapjv against itself already diverges
+  within 5–170 frames on real clips, even with the sequential pipeline). That is detector/embedding
+  numerics, not the solver. Solver comparisons on real data therefore use recorded-input replays (see
+  "Real clips" above).
