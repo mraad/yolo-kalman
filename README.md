@@ -1,12 +1,13 @@
 # yolo-kalman — native YOLO + GPU Kalman multi-object tracker with occlusion-robust ids
 
-![Tracker output on a street clip: a bus passes in front of a pedestrian, and the pedestrian keeps id 27 after the bus has gone](docs/img/tracking.gif)
+![Tracker output on a street clip: a white van crosses the foreground and hides three parked cars, and each car has the same id after the van has gone](docs/img/tracking.gif)
 
-*Tracker output, frames 881–1056 of "Traffic on Slovenska street" by Sounds of Changes
-([CC BY 3.0](https://creativecommons.org/licenses/by/3.0/), via
-[Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Traffic_on_Slovenska_street.webm)).
-The bus hides pedestrian 27 on the left. Pedestrian 27 has the same id when the bus has gone.
-Changes: tracking boxes, ids and trails added; scaled to 480 px; 10 fps.*
+*Tracker output, frames 77–181 of "Inbound B Branch train, March 2021" by Flickr user 132192938@N04
+([CC BY 2.0](https://creativecommons.org/licenses/by/2.0/), via
+[Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Inbound_B_Branch_train,_March_2021.webm)).
+A white van (id 21) crosses the foreground and fully hides the parked cars for about 1 second.
+Cars 5, 9 and 12 have the same ids when the van has gone.
+Changes: tracking boxes, ids and trails added; scaled to 640 px; 12 fps.*
 
 Full manual (diagrams, procedures, configuration, results): [`docs/index.html`](docs/index.html).
 Rebuild it with `python3 docs/build_docs.py` after editing `docs/index.src.html`.
@@ -32,6 +33,14 @@ streams:
   weights are person-only (we also track vehicles/animals), distributed via Google Drive, and torchreid
   is unmaintained on PyPI. A generic class-agnostic descriptor installs from the PyTorch index. It sits
   behind a one-method interface (`reid.AppearanceEncoder`), so a proper re-ID net can replace it.
+* **Duplicate detections**: the detector sometimes gives one object two times (a second box, or a
+  second class label such as car + truck): 2,794 pairs of boxes with IoU > 0.8 in 10,560 frames of the
+  12 real clips (`scratch/dup_probe.py`). Each copy started its own track, so one object had two ids for
+  some frames. `detector.duplicate_of_better` now drops the lower-score box of such a pair (any class).
+  Frames where two tracks overlap with IoU > 0.8: 244 before, 25 after (`results/real_dedup`); the
+  synthetic occlusion table is unchanged for the full tracker. The real-clip and throughput tables below
+  are from runs before this change; a re-run at 16 streams gives 5,275 fps (before: 5,272,
+  `results/bench/bench_dedup.json`).
 * **Assignment**: all cost matrices are computed on the GPU, and by default the whole matching cascade
   runs there too, using a **batched exact GPU Hungarian solver** (see next section). The previous CPU
   cascade with `lap.lapjv` is kept as the reference (`TrackerConfig(assign="lapjv")`, `--assign lapjv`).
@@ -173,7 +182,7 @@ dropped in. I did not build one; see "not done".
 ./run.sh scripts/download_clips.py                     # Wikimedia 480p VP9 transcodes -> clips/ (untrusted data)
 ./run.sh scripts/export_trt.py yolo26m.pt --nms-free   # TRT FP16 engine -> models/ (downloads yolo26m.pt)
 ./run.sh scripts/make_synthetic.py                     # synthetic occlusion clips + GT -> data/synth
-REQUIRE_E2E=1 ./run.sh -m pytest -rs -q               # 23 tests (KF, solver vs scipy/lapjv, synthetic, e2e)
+REQUIRE_E2E=1 ./run.sh -m pytest -rs -q               # 25 tests (KF, solver vs scipy/lapjv, detector, synthetic, e2e)
 ./run.sh scripts/eval_synth.py --overlay               # HOTA/IDF1/IDSW + ablations -> results/synth (--assign lapjv)
 ./run.sh scripts/track.py clips/*.webm --out results/real --overlay   # all clips as parallel streams
 ./run.sh scripts/bench.py --streams 1 4 8 16 32 --gpus 0 1 --frames 1200 --repeats 3 --assign gpu_hungarian  # or --assign lapjv
@@ -383,6 +392,8 @@ but I have not proven the root cause.
 * ResNet-18 ImageNet features are not a trained re-ID model. They work on the synthetic clips and
   noticeably reduce id counts on real clips, but similar-looking objects (same-colour cars) can be
   confused. The S4/recovery stages are gated by Mahalanobis distance and class group to limit this.
+* A lost track can match the wrong object for a few frames. Example in the GIF at the top: car 11 sits
+  on a window of the van for frames 138–140 while the van hides the car.
 * HOTA is a re-implementation, not TrackEval itself.
 * Ids are unique per stream, not globally.
 * GPU Hungarian: exactness is tested in total cost against scipy and lapjv (random and edge-case
