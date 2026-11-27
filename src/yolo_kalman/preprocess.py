@@ -28,11 +28,3 @@ def letterbox_into(out: torch.Tensor, frames: torch.Tensor, pad_value: float = 1
     out[:, :, top:top + nh, left:left + nw] = x
     return r, (top, left)
 
-
-def unletterbox_boxes(boxes: torch.Tensor, ratio, offset, src_hw):
-    """Map x1y1x2y2 boxes from letterbox to source pixels (works on [...,4]); clip to image."""
-    top, left = offset
-    b = boxes.clone()
-    b[..., [0, 2]] = ((b[..., [0, 2]] - left) / ratio).clamp(0, src_hw[1])
-    b[..., [1, 3]] = ((b[..., [1, 3]] - top) / ratio).clamp(0, src_hw[0])
-    return b

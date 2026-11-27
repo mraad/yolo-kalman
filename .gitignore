@@ -11,3 +11,4 @@ models/
 *.pt
 .pytest_cache/
 data/synth/*.mp4
+.DS_Store

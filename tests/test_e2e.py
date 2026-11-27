@@ -1,5 +1,6 @@
 """End-to-end: NVDEC -> TensorRT YOLO -> re-ID -> tracker on real and rendered clips."""
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -11,7 +12,15 @@ ENGINE = ROOT / "models/yolo26m_384x640_b64_e2e_fp16.engine"
 REAL = ROOT / "clips/London_United_LTZ1130_passing_House_of_Commons_in_May_2015.webm"
 SYN = ROOT / "data/synth/synth_gap030.mp4"
 
-pytestmark = pytest.mark.skipif(not ENGINE.exists(), reason="TensorRT engine not exported")
+
+def _need(path: Path, how: str):
+    """Skip when an artefact (gitignored) is missing; fail instead with REQUIRE_E2E=1."""
+    if path.exists():
+        return
+    msg = f"{path.relative_to(ROOT)} missing: {how}"
+    if os.environ.get("REQUIRE_E2E") == "1":
+        pytest.fail(msg)
+    pytest.skip(msg)
 
 
 def _pipe(paths, **kw):
@@ -22,8 +31,9 @@ def _pipe(paths, **kw):
     return Pipeline([str(p) for p in paths], gpu=0, cfg=cfg)
 
 
-@pytest.mark.skipif(not REAL.exists(), reason="real clip not downloaded")
 def test_real_clip_runs_and_tracks_bus():
+    _need(ENGINE, "run scripts/export_trt.py")
+    _need(REAL, "run scripts/download_clips.py")
     from yolo_kalman.summary import track_stats
 
     pipe = _pipe([REAL], classes=[0, 1, 2, 3, 5, 7])
@@ -41,8 +51,9 @@ def test_real_clip_runs_and_tracks_bus():
     assert pipe.timing["detect"] > 0 and pipe.tracker.timing["match"] > 0
 
 
-@pytest.mark.skipif(not SYN.exists(), reason="run scripts/make_synthetic.py first")
 def test_synthetic_clip_same_id_after_full_occlusion():
+    _need(ENGINE, "run scripts/export_trt.py")
+    _need(SYN, "run scripts/make_synthetic.py")
     sys.path.insert(0, str(ROOT / "scripts"))
     from eval_synth import load_gt, occlusion_check
 

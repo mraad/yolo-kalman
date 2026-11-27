@@ -24,12 +24,6 @@ def _wh4(wh: torch.Tensor) -> torch.Tensor:
     return torch.cat([wh, wh], -1)
 
 
-def motion_matrix(dt: float = 1.0, device=None, dtype=torch.float32) -> torch.Tensor:
-    F = torch.eye(8, device=device, dtype=dtype)
-    F[:4, 4:] = torch.eye(4, device=device, dtype=dtype) * dt
-    return F
-
-
 def initiate(z: torch.Tensor):
     """z [...,4] -> mean [...,8], cov [...,8,8]"""
     mean = torch.cat([z, torch.zeros_like(z)], -1)

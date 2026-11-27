@@ -22,13 +22,13 @@ epsilon, no iteration cap.
 
 CUDA kernel: one thread block per batch element (= stream).  All 256 threads find the allowed
 rows/columns (coalesced pass over the padded matrix) and stage the compacted sub-matrix in shared
-memory; then one warp runs the Hungarian search: columns strided over the 32 lanes, the Dijkstra
+memory when it fits the device's per-block shared-memory limit (larger problems read global
+memory); then one warp runs the Hungarian search: columns strided over the 32 lanes, the Dijkstra
 arg-min is a warp-shuffle reduction (ties -> lowest column index, deterministic).  All
 data-dependent loops live inside the kernel, so a call is one fixed launch: CUDA-graph capturable,
 no host sync.  Exposed as the torch custom op ``yolo_kalman::lap_batch`` (works under
-torch.compile).  ``lap_batch_torch`` is a pure-PyTorch batched implementation of the same
-algorithm (needs a host sync per Dijkstra step); it is the CPU fallback and the measured
-alternative (see README).
+torch.compile).  A pure-PyTorch batched version was measured ~300x slower (host sync per Dijkstra
+step) and removed (see README).
 """
 from __future__ import annotations
 
@@ -42,18 +42,19 @@ import torch
 _CUDA_SRC = r"""
 #include <torch/extension.h>
 #include <ATen/cuda/CUDAContext.h>
+#include <c10/cuda/CUDAGuard.h>
 #include <cuda_runtime.h>
 #include <math_constants.h>
+#include <algorithm>
 
 #define FULL 0xffffffffu
 
 #define NT 256          // threads per block: all of them compact / stage, warp 0 solves
-#define SUBMAX 6144     // compacted sub-matrix staged in shared memory if n*m <= SUBMAX (24 KB)
 
 // one block per batch element
 __global__ void __launch_bounds__(NT) lap_sap_kernel(
     const float* __restrict__ cost, const bool* __restrict__ rmask, const bool* __restrict__ cmask,
-    int64_t* __restrict__ out, int R, int C, double limit) {
+    int64_t* __restrict__ out, int R, int C, double limit, int submax) {
   extern __shared__ unsigned char smem[];
   const int b = blockIdx.x, tid = threadIdx.x, lane = tid & 31;
   const float* cb = cost + (size_t)b * R * C;
@@ -65,8 +66,8 @@ __global__ void __launch_bounds__(NT) lap_sap_kernel(
   double* u    = (double*)smem;                 // [R+1]   row duals (1-based)
   double* v    = u + (R + 1);                   // [W+1]   column duals (1-based, 0 = virtual)
   double* minv = v + (WMAX + 1);                // [W+1]
-  float* sub   = (float*)(minv + (WMAX + 1));   // [SUBMAX] compacted costs (row-major n x m)
-  int* p       = (int*)(sub + SUBMAX);          // [W+1]   row assigned to column (0 = free)
+  float* sub   = (float*)(minv + (WMAX + 1));   // [submax] compacted costs (row-major n x m)
+  int* p       = (int*)(sub + submax);          // [W+1]   row assigned to column (0 = free)
   int* way     = p + (WMAX + 1);                // [W+1]   predecessor column on the path
   int* ri      = way + (WMAX + 1);              // [R]     compacted row -> original row
   int* cj      = ri + R;                        // [C]     compacted col -> original col
@@ -108,7 +109,9 @@ __global__ void __launch_bounds__(NT) lap_sap_kernel(
   __syncthreads();
   const int n = nm[0], m = nm[1];
   if (n == 0 || m == 0) return;
-  const bool staged = n * m <= SUBMAX;
+  // stage the compacted costs in shared memory when they fit (submax, set by the host from the
+  // device limit); larger problems read the padded matrix in global memory through the column index
+  const bool staged = n * m <= submax;
   if (staged) {
     for (int e = tid; e < n * m; e += NT) {
       int i = e / m, j = e - i * m;
@@ -186,13 +189,20 @@ torch::Tensor lap_batch_cuda(torch::Tensor cost, torch::Tensor rmask, torch::Ten
   if (B == 0 || R == 0) return out;
   if (C == 0) { out.fill_(-1); return out; }
   const int W = R + C;
-  size_t sh = (size_t)(R + 1) * 8 + (size_t)(W + 1) * 16 + (size_t)SUBMAX * 4 + (size_t)(W + 1) * 8
-              + (size_t)(R + C + 2) * 4 + (W + 1) + R + C;
+  const c10::cuda::CUDAGuard guard(c.device());
+  // fixed shared arrays of the kernel layout (+16 B alignment slack), then the staged-cost budget
+  size_t base = (size_t)(R + 1) * 8 + (size_t)(W + 1) * 16 + (size_t)(W + 1) * 8
+                + (size_t)(R + C + 2) * 4 + (W + 1) + R + C + 16;
+  const size_t maxsh = at::cuda::getCurrentDeviceProperties()->sharedMemPerBlockOptin;  // cached by ATen
+  TORCH_CHECK(base <= maxsh, "lap_batch: ", R, "x", C, " needs ", base, " B shared memory, device allows ",
+              maxsh, " B: lower max_tracks / max_dets");
+  const int submax = (int)std::min<size_t>((size_t)R * C, (maxsh - base) / 4);
+  size_t sh = base + (size_t)submax * 4;
   auto stream = at::cuda::getCurrentCUDAStream();
   if (sh > 48 * 1024)
     cudaFuncSetAttribute(lap_sap_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, (int)sh);
   lap_sap_kernel<<<B, NT, sh, stream>>>(c.data_ptr<float>(), rm.data_ptr<bool>(), cmk.data_ptr<bool>(),
-                                        out.data_ptr<int64_t>(), R, C, limit);
+                                        out.data_ptr<int64_t>(), R, C, limit, submax);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
   return out;
 }
@@ -229,104 +239,14 @@ def _load_ext():
 def lap_batch(cost: torch.Tensor, row_mask: torch.Tensor, col_mask: torch.Tensor, limit: float) -> torch.Tensor:
     """Optimal assignment for every batch element.  cost [B,R,C] float32, row_mask [B,R] bool,
     col_mask [B,C] bool -> [B,R] int64 column per row (-1 = unmatched / masked)."""
-    if cost.is_cuda:
-        return _load_ext().lap_batch_cuda(cost.float(), row_mask, col_mask, float(limit))
-    return lap_batch_torch(cost, row_mask, col_mask, limit)
+    if not cost.is_cuda:
+        raise ValueError("lap_batch needs CUDA tensors (use lap.lapjv / scipy on the CPU)")
+    return _load_ext().lap_batch_cuda(cost.float(), row_mask, col_mask, float(limit))
 
 
 @lap_batch.register_fake
 def _(cost, row_mask, col_mask, limit):
     return cost.new_empty(cost.shape[:2], dtype=torch.long)
-
-
-# ----------------------------------------------------------------------------------------------
-@torch.no_grad()
-def lap_batch_torch(cost: torch.Tensor, row_mask: torch.Tensor, col_mask: torch.Tensor,
-                    limit: float) -> torch.Tensor:
-    """Same algorithm, vectorised over the batch in plain PyTorch (any device).
-
-    Rows are inserted in lock-step over the batch; the Dijkstra loop ends when every batch element
-    has reached a free column, which needs a ``.any()`` host sync per step.
-    """
-    B, R, C = cost.shape
-    dev = cost.device
-    out = torch.full((B, R), -1, dtype=torch.long, device=dev)
-    if B == 0 or R == 0 or C == 0:
-        return out
-    c = cost.double()
-    allowed = row_mask[:, :, None] & col_mask[:, None, :] & (c <= limit)
-    rok = allowed.any(2)                                   # [B,R]
-    cok = allowed.any(1)                                   # [B,C]
-    n = rok.sum(1)
-    m = cok.sum(1)
-    nmax, mmax = int(n.max()), int(m.max())
-    if nmax == 0 or mmax == 0:
-        return out
-    # order-preserving compaction: stable sort puts selected indices first
-    ri = torch.sort((~rok).to(torch.int8), dim=1, stable=True).indices[:, :nmax]   # [B,nmax]
-    cj = torch.sort((~cok).to(torch.int8), dim=1, stable=True).indices[:, :mmax]
-    sub = c.gather(1, ri[:, :, None].expand(B, nmax, C)).gather(2, cj[:, None, :].expand(B, nmax, mmax))
-    ok = allowed.gather(1, ri[:, :, None].expand(B, nmax, C)).gather(2, cj[:, None, :].expand(B, nmax, mmax))
-    ar_n = torch.arange(nmax, device=dev)
-    ar_m = torch.arange(mmax, device=dev)
-    ok &= (ar_n[None, :, None] < n[:, None, None]) & (ar_m[None, None, :] < m[:, None, None])
-    INF = float("inf")
-    # columns: 0 virtual, 1..mmax real, mmax+1..mmax+nmax dummy (dummy k valid iff k < n[b])
-    W = mmax + nmax
-    a = torch.full((B, nmax + 1, W + 1), INF, dtype=torch.float64, device=dev)
-    a[:, 1:, 1:mmax + 1] = torch.where(ok, sub - limit, INF)
-    dvalid = ar_n[None, :] < n[:, None]                                         # [B,nmax]
-    a[:, 1:, mmax + 1:] = torch.where(dvalid[:, None, :], 0.0, INF)
-    colvalid = torch.ones(B, W + 1, dtype=torch.bool, device=dev)
-    colvalid[:, 1:mmax + 1] = ar_m[None, :] < m[:, None]
-    colvalid[:, mmax + 1:] = dvalid
-    colvalid[:, 0] = False
-    u = torch.zeros(B, nmax + 1, dtype=torch.float64, device=dev)
-    v = torch.zeros(B, W + 1, dtype=torch.float64, device=dev)
-    p = torch.zeros(B, W + 1, dtype=torch.long, device=dev)
-    way = torch.zeros(B, W + 1, dtype=torch.long, device=dev)
-    bidx = torch.arange(B, device=dev)
-    colidx = torch.arange(W + 1, device=dev)
-    for i in range(1, nmax + 1):
-        act = i <= n                                                            # [B]
-        p[:, 0] = torch.where(act, i, 0)
-        minv = torch.full((B, W + 1), INF, dtype=torch.float64, device=dev)
-        used = torch.zeros(B, W + 1, dtype=torch.bool, device=dev)
-        j0 = torch.zeros(B, dtype=torch.long, device=dev)
-        running = act.clone()
-        while bool(running.any()):
-            used[bidx, j0] |= running
-            i0 = p[bidx, j0]                                                    # [B]
-            cur = a[bidx, i0] - u[bidx, i0][:, None] - v                        # [B,W+1]
-            upd = running[:, None] & ~used & colvalid & (cur < minv)
-            minv = torch.where(upd, cur, minv)
-            way = torch.where(upd, j0[:, None], way)
-            cand = torch.where(~used & colvalid, minv, INF)
-            delta, j1 = cand.min(1)                                             # first index on ties
-            delta = torch.where(running, delta, 0.0)
-            urow = torch.where(used & running[:, None], p, 0)
-            u.scatter_add_(1, urow, torch.where(used & running[:, None], delta[:, None], 0.0)
-                           .expand_as(urow).contiguous())
-            v = torch.where(used & running[:, None], v - delta[:, None], v)
-            minv = torch.where(~used & running[:, None], minv - delta[:, None], minv)
-            j0 = torch.where(running, j1, j0)
-            running = running & (p[bidx, j0] != 0)
-        # augment along way[] (sequential pointer chase, vectorised over the batch)
-        cur_j = torch.where(act, j0, 0)
-        while bool((cur_j != 0).any()):
-            nz = cur_j != 0
-            jp = way[bidx, cur_j]
-            newp = p[bidx, jp]
-            p[bidx, cur_j] = torch.where(nz, newp, p[bidx, cur_j])
-            cur_j = torch.where(nz, jp, cur_j)
-    # rows assigned to real columns
-    pr = p[:, 1:mmax + 1]                                                       # [B,mmax] row (1-based)
-    hit = (pr > 0) & (colidx[None, 1:mmax + 1] - 1 < m[:, None])
-    rows = ri.gather(1, (pr - 1).clamp(min=0))
-    tmp = torch.full((B, R + 1), -1, dtype=torch.long, device=dev)
-    tmp.scatter_(1, torch.where(hit, rows, R), torch.where(hit, cj, -1))
-    out.copy_(tmp[:, :R])
-    return out
 
 
 # ----------------------------------------------------------------------------------------------

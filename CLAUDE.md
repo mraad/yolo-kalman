@@ -17,7 +17,8 @@ re-ID tracker in PyTorch, batched over streams. See README.md for results and co
 - `src/yolo_kalman/assign.py` batched exact Hungarian (shortest augmenting path + duals) CUDA kernel,
   one block per stream; torch custom op `yolo_kalman::lap_batch(cost[B,R,C], row_mask, col_mask, limit)`
   = lap.lapjv(extend_cost=True, cost_limit) semantics; JIT-built via load_inline (needs nvcc in
-  /usr/local/cuda + ninja from the venv; cache ~/.cache/torch_extensions). `lap_batch_torch` = fallback.
+  /usr/local/cuda + ninja from the venv; cache ~/.cache/torch_extensions). CUDA tensors only. Costs are
+  staged in shared memory up to the device opt-in limit (example in README), else read from global.
 - `src/yolo_kalman/tracker.py` `MultiStreamTracker`: fixed [S,M] slot tensors on GPU.
   `assign="gpu_hungarian"` (default): cascade + bookkeeping on GPU (`g_*` tensors), 3 CUDA graphs per
   step (gpre / gmatch / gpost), `submit()` + `collect()` = one sync per batch of steps.
@@ -34,6 +35,10 @@ re-ID tracker in PyTorch, batched over streams. See README.md for results and co
   `track.py`, `bench.py`. Tests in `tests/`.
 
 ## Gotchas
+- Tests: `REQUIRE_E2E=1 ./run.sh -m pytest -rs -q`. Without it, missing engine/clips make the e2e
+  tests skip silently. pytest/motmetrics are in the uv dev group.
+- Benchmarks: `--repeats 3` (median-FPS run reported, all runs in `fps_runs`); clips cap a stream at
+  ~1,350 frames, so repeat instead of lengthening runs.
 - CUDA-graph capture: create the tracker **before** opening NVDEC decoders (decoder threads on
   the legacy stream invalidate captures); capture uses `capture_error_mode="thread_local"`.
 - Anything inside `_pre_core/_post_impl` must be shape-static, sync-free (no `.item()`, no

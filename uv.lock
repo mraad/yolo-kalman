@@ -1041,13 +1041,11 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "lap" },
-    { name = "motmetrics" },
     { name = "ninja" },
     { name = "numpy" },
     { name = "nvidia-ml-py" },
     { name = "opencv-python-headless" },
     { name = "pynvvideocodec" },
-    { name = "pytest" },
     { name = "scipy" },
     { name = "tensorrt-cu13" },
     { name = "torch" },
@@ -1055,19 +1053,29 @@ dependencies = [
     { name = "ultralytics" },
 ]
 
+[package.dev-dependencies]
+dev = [
+    { name = "motmetrics" },
+    { name = "pytest" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "lap" },
-    { name = "motmetrics" },
     { name = "ninja", specifier = ">=1.13.2" },
     { name = "numpy" },
     { name = "nvidia-ml-py" },
     { name = "opencv-python-headless" },
     { name = "pynvvideocodec", specifier = ">=2.2.4" },
-    { name = "pytest" },
     { name = "scipy" },
     { name = "tensorrt-cu13", specifier = ">=11.5.0.63" },
     { name = "torch", specifier = ">=2.9", index = "https://download.pytorch.org/whl/cu130" },
     { name = "torchvision", index = "https://download.pytorch.org/whl/cu130" },
     { name = "ultralytics" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "motmetrics", specifier = ">=1.4.0" },
+    { name = "pytest", specifier = ">=9.2.0" },
 ]

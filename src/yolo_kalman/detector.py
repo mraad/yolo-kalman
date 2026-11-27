@@ -24,13 +24,10 @@ import torchvision
 
 @dataclass
 class Detections:
-    boxes: torch.Tensor   # [B,K,4] float32 x1y1x2y2 (letterbox coords until unletterboxed)
+    boxes: torch.Tensor   # [B,K,4] float32 x1y1x2y2 in letterbox pixels (pipeline maps to source px)
     scores: torch.Tensor  # [B,K] float32
     cls: torch.Tensor     # [B,K] int64
     valid: torch.Tensor   # [B,K] bool
-
-    def __getitem__(self, i):
-        return Detections(self.boxes[i], self.scores[i], self.cls[i], self.valid[i])
 
 
 class Detector(Protocol):

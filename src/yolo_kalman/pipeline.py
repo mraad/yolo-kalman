@@ -59,7 +59,7 @@ class _Chunk:
 
 
 class Pipeline:
-    def __init__(self, paths: list[str], gpu: int = 0, cfg: PipelineConfig | None = None, keep_frames=False):
+    def __init__(self, paths: list[str], gpu: int = 0, cfg: PipelineConfig | None = None):
         self.cfg = cfg or PipelineConfig()
         self.gpu = gpu
         self.dev = torch.device("cuda", gpu)
@@ -95,7 +95,6 @@ class Pipeline:
         self._lb_off = torch.stack([left, top, left, top], -1)
         self._lb_lim = torch.stack([hw[:, 1], hw[:, 0], hw[:, 1], hw[:, 0]], -1).view(S, 1, 1, 4)
         self.same_size = len({tuple(s.hw) for s in self.srcs}) == 1
-        self.keep_frames = keep_frames
         self.timing = {"decode": 0.0, "preprocess": 0.0, "detect": 0.0, "embed": 0.0, "track": 0.0}
         self.frames_done = 0
         # tracker kernels are tiny and latency-bound: run them on a high-priority stream so they are

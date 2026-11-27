@@ -1,6 +1,7 @@
 """End-to-end throughput benchmark: N parallel streams split across GPUs (one worker process per GPU).
 
-usage: ./run.sh scripts/bench.py --streams 1 4 8 16 --gpus 0 1 --frames 1200
+usage: ./run.sh scripts/bench.py --streams 1 4 8 16 --gpus 0 1 --frames 1200 --repeats 3
+Each setting runs --repeats times; the run with the median total FPS is reported (all FPS kept in fps_runs).
 Samples NVML GPU utilisation / memory / NVDEC utilisation every 100 ms during each run.
 Writes results/bench/bench.json and a markdown table.
 """
@@ -46,6 +47,7 @@ def _worker(wid, gpu, paths, cfg_kw, q):
 
     torch.cuda.set_device(gpu)
     tk = cfg_kw.pop("tracker", {})
+    cfg_kw["engine"] = str(ROOT / cfg_kw["engine"])   # recorded relative in the JSON, absolute for loading
     cfg = PipelineConfig(**cfg_kw, tracker=TrackerConfig(**tk))
     pipe = Pipeline([str(ROOT / p) for p in paths], gpu=gpu, cfg=cfg)
     # warm-up (TRT context, cuDNN autotune, lazy init) on a throwaway pipeline-sized batch
@@ -171,15 +173,19 @@ def main():
     ap.add_argument("--wpg", type=int, default=1, help="worker processes per GPU")
     ap.add_argument("--assign", choices=["gpu_hungarian", "lapjv"], default="gpu_hungarian",
                     help="tracker assignment solver")
+    ap.add_argument("--repeats", type=int, default=3, help="runs per setting; the median-FPS run is reported")
     a = ap.parse_args()
-    cfg_kw = {"engine": str(ROOT / a.engine), "chunk": a.chunk, "max_frames": a.frames,
+    cfg_kw = {"engine": a.engine, "chunk": a.chunk, "max_frames": a.frames,
               "use_reid": not a.no_reid, "overlap": not a.no_overlap, "profile": a.profile,
               "classes": [0, 1, 2, 3, 5, 7, 14, 15, 16], "tracker": {"assign": a.assign}}
     out = ROOT / "results/bench"
     out.mkdir(parents=True, exist_ok=True)
     rows = []
     for n in a.streams:
-        r = run_config(n, a.gpus, dict(cfg_kw), a.wpg)
+        runs = sorted((run_config(n, a.gpus, dict(cfg_kw), a.wpg) for _ in range(max(1, a.repeats))),
+                      key=lambda x: x["fps_total"])
+        r = runs[len(runs) // 2]
+        r["fps_runs"] = [round(x["fps_total"], 1) for x in runs]
         r["tag"] = a.tag
         r["cfg"] = cfg_kw
         rows.append(r)
@@ -190,7 +196,7 @@ def main():
         util = " ".join(f"gpu{g}:{s.get('util_mean', 0):.0f}%/dec{s.get('nvdec_mean', 0):.0f}%"
                         for g, s in zip(r["gpus"], r["nvml"]))
         print(f"[{a.tag}] streams={n:2d} gpus={r['gpus']} workers={r['workers']} fps_total={r['fps_total']:.0f} "
-              f"per_stream={r['fps_per_stream']:.0f} wall={r['wall_s']:.1f}s  {util}  "
+              f"(runs {r['fps_runs']}) per_stream={r['fps_per_stream']:.0f} wall={r['wall_s']:.1f}s  {util}  "
               f"split(s/gpu)=" + " ".join(f"{k}:{v:.2f}" for k, v in t.items()), flush=True)
     f = out / f"bench_{a.tag}.json"
     f.write_text(json.dumps(rows, indent=1))
