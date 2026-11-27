@@ -27,6 +27,7 @@ re-ID tracker in PyTorch, batched over streams. See README.md for results and co
   (`tests/test_synthetic.py::test_gpu_hungarian_cascade_matches_lapjv`): change cascade logic in both.
 - `detector.py` `Detector` protocol + `TRTYolo` (TensorRT, own runner, reads the Ultralytics
   metadata prefix) + `TorchYolo` fallback; `postprocess_e2e` (NMS-free YOLO26) / `postprocess_raw`.
+  Both drop near-duplicate boxes (`duplicate_of_better`, IoU > 0.8, any class): the head emits one object twice.
 - `decode.py` NVDEC (`PyNvVideoCodec.ThreadedDecoder`) / OpenCV fallback; `preprocess.py` GPU letterbox.
 - `reid.py` ResNet-18 RoI-aligned crops → 512-d embeddings.
 - `pipeline.py` producer thread (decode+letterbox+detect+embed, low-prio CUDA stream) / consumer

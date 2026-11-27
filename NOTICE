@@ -17,10 +17,11 @@ docs/img/strip_g120.jpg, scratch/*_peek.jpg, data/synth/*.json, data/synth/*.gt.
   zidane.jpg, assets of the ultralytics package (AGPL-3.0).
 
 docs/img/tracking.gif
-  Frames 881-1056 of "Traffic on Slovenska street" by Sounds of Changes, CC BY 3.0
-  (https://creativecommons.org/licenses/by/3.0/), via Wikimedia Commons:
-  https://commons.wikimedia.org/wiki/File:Traffic_on_Slovenska_street.webm
-  Changes: tracking boxes, ids and trails added, scaled to 480 px, 10 fps.
+  Frames 77-181 of "Inbound B Branch train, March 2021" by Flickr user
+  132192938@N04, CC BY 2.0 (https://creativecommons.org/licenses/by/2.0/), via
+  Wikimedia Commons:
+  https://commons.wikimedia.org/wiki/File:Inbound_B_Branch_train,_March_2021.webm
+  Changes: tracking boxes, ids and trails added, scaled to 640 px, 12 fps.
 
 docs/img/traffic.jpg
   Frame of "Traffic on Slovenska street" by Sounds of Changes, CC BY 3.0

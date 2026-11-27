@@ -93,3 +93,12 @@ Decisions (made unattended):
 - [x] synthetic clips and docs/img/strip_g120.jpg use person cut-outs from Ultralytics
   bus.jpg / zidane.jpg (AGPL-3.0 assets, real people): published as is (owner decision), listed in NOTICE
 - [x] public repo https://github.com/mraad/yolo-kalman, branch main; CLAUDE.md updated
+
+## Tracking review after the README GIF correction (2026-11-27)
+- [x] README GIF caption was wrong (pedestrian 27 was never hidden): replaced with a verified
+  occlusion (van hides cars 5, 9, 12 in "Inbound B Branch train"), caption + NOTICE corrected
+- [x] root cause of two ids on one object: duplicate detections from the head (2,794 pairs IoU > 0.8 in
+  10,560 frames) -> `detector.duplicate_of_better`, test in tests/test_detector.py; duplicate track
+  pair-frames 244 -> 25 (results/real_dedup); synthetic table unchanged for the full tracker
+- [ ] open: README real-clip and throughput tables are from runs before the duplicate fix
+- [ ] open: a lost track can match the wrong object for a few frames (car 11 on the van, frames 138-140)

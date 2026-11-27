@@ -83,19 +83,40 @@ def postprocess_raw(raw: torch.Tensor, conf: float, iou: float, max_det: int,
     scores[bi, rank] = fs
     clsout[bi, rank] = fc
     valid[bi, rank] = True
-    return Detections(boxes, scores, clsout, valid)
+    valid &= ~duplicate_of_better(boxes, valid)   # batched_nms is per class: cross-class duplicates remain
+    return Detections(boxes, scores * valid, clsout, valid)
+
+
+DUP_IOU = 0.8   # two boxes above this IoU are one object (measured: scratch/dup_probe.py)
+
+
+def duplicate_of_better(boxes: torch.Tensor, valid: torch.Tensor, thr: float = DUP_IOU) -> torch.Tensor:
+    """``[B,K]`` bool: box j overlaps a valid, higher-ranked box i < j by IoU > thr, any class.
+
+    The heads emit the same object twice (a second box, or a second class label). Each copy starts
+    its own track, so one object carries two ids. Rows must be score-sorted. Shape-static, no sync.
+    One pass, not greedy NMS: a box is also dropped when its better box was itself dropped.
+    """
+    lt = torch.maximum(boxes[:, :, None, :2], boxes[:, None, :, :2])
+    rb = torch.minimum(boxes[:, :, None, 2:], boxes[:, None, :, 2:])
+    inter = (rb - lt).clamp(min=0).prod(-1)                       # [B,K,K]
+    area = (boxes[..., 2:] - boxes[..., :2]).clamp(min=0).prod(-1)
+    iou = inter / (area[:, :, None] + area[:, None, :] - inter).clamp(min=1e-9)
+    return ((iou > thr) & valid[:, :, None]).triu(1).any(1)
 
 
 def postprocess_e2e(raw: torch.Tensor, conf: float, max_det: int, classes: torch.Tensor | None) -> Detections:
     """NMS-free YOLO26 one-to-one head ``[B, K, 6]`` (x1,y1,x2,y2,score,cls), already score-sorted.
 
-    Pure elementwise ops: no host synchronisation at all.
+    Pure elementwise ops: no host synchronisation at all. The head is not duplicate-free in
+    practice, so near-identical boxes are dropped (see :func:`duplicate_of_better`).
     """
     raw = raw[:, :max_det].float()
     boxes, scores, cls = raw[..., :4], raw[..., 4], raw[..., 5].long()
     valid = scores > conf
     if classes is not None:
         valid &= torch.isin(cls, classes)
+    valid &= ~duplicate_of_better(boxes, valid)
     scores = scores * valid
     return Detections(boxes.contiguous(), scores, cls, valid)
 
