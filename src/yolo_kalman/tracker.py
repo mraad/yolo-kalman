@@ -269,14 +269,15 @@ class MultiStreamTracker:
         v_det = F.normalize(dz[:, None, :, :2] - prev[:, :, None, :], dim=-1)
         cosang = (v_trk[:, :, None, :] * v_det).sum(-1).clamp(-1, 1)
         angle_sim = (np.pi / 2 - torch.arccos(cosang).abs()) / np.pi    # [-0.5, 0.5]
-        edist = 1.0 - torch.einsum("smd,snd->smn", self.emb, self.in_emb)
+        # fp16 tensor-core matmul (fp32 accumulate); the result is stored as fp16 anyway
+        edist = 1.0 - torch.einsum("smd,snd->smn", self.emb.half(), self.in_emb.half()).float()
         packed = torch.stack([iou, d2, iou_last, angle_sim, edist], 1)
         packed = torch.nan_to_num(packed, nan=BIG, posinf=BIG, neginf=-BIG).clamp(-BIG, BIG)
         dd = kf.pairwise_iou(boxes, boxes)
         eye = torch.eye(boxes.shape[1], device=boxes.device, dtype=torch.bool)
         dd = dd.masked_fill(eye | ~self.in_valid[:, None, :], 0).amax(-1)
         # track-track terms for id recovery: rows = (lost) track distribution, cols = (young) track box
-        tt_e = 1.0 - torch.einsum("smd,snd->smn", self.emb, self.emb)
+        tt_e = 1.0 - torch.einsum("smd,snd->smn", self.emb.half(), self.emb.half()).float()
         tt_d2 = kf.mahalanobis_sq(self.mean, self.cov, self.mean[..., :4])
         tt = torch.nan_to_num(torch.stack([tt_e, tt_d2], 1), nan=BIG, posinf=BIG, neginf=-BIG).clamp(-BIG, BIG)
         return (packed.half(), torch.cat([dd[..., None], dz[..., 2:4]], -1),

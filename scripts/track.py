@@ -28,13 +28,15 @@ def main():
     ap.add_argument("--no-reid", action="store_true")
     ap.add_argument("--lost-s", type=float, default=8.0)
     ap.add_argument("--max-frames", type=int, default=None)
+    ap.add_argument("--assign", choices=["gpu_hungarian", "lapjv"], default="gpu_hungarian",
+                    help="assignment solver: batched GPU Hungarian (cascade on GPU) or CPU lap.lapjv reference")
     ap.add_argument("--classes", type=int, nargs="*", default=[0, 1, 2, 3, 5, 7, 14, 15, 16],
                     help="COCO ids: person, bicycle, car, motorcycle, bus, truck, bird, cat, dog")
     a = ap.parse_args()
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
     cfg = PipelineConfig(engine=a.engine, chunk=a.chunk, use_reid=not a.no_reid, max_frames=a.max_frames,
-                         classes=a.classes, tracker=TrackerConfig(lost_buffer_s=a.lost_s))
+                         classes=a.classes, tracker=TrackerConfig(lost_buffer_s=a.lost_s, assign=a.assign))
     pipe = Pipeline(a.clips, gpu=a.gpu, cfg=cfg)
     writers = []
     if a.overlay:

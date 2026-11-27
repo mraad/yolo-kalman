@@ -28,9 +28,18 @@ def worker(wid, gpu, paths, cfg_kw, q):
         import traceback
         q.put(("error", wid, traceback.format_exc()))
         raise
+    finally:
+        # flush the queue's feeder thread before the process exits: the "done" message was sometimes
+        # lost when interpreter teardown (CUDA / NVDEC / TensorRT) ended the process first, and the
+        # parent then waited forever (the intermittent benchmark "hang")
+        q.close()
+        q.join_thread()
 
 
 def _worker(wid, gpu, paths, cfg_kw, q):
+    import faulthandler
+    import signal
+    faulthandler.register(signal.SIGUSR1, all_threads=True)   # `kill -USR1 <pid>` dumps stacks (hang triage)
     import torch
     from yolo_kalman.pipeline import Pipeline, PipelineConfig
     from yolo_kalman.tracker import TrackerConfig
@@ -102,6 +111,11 @@ def _get(q, procs):
             dead = [(i, p.exitcode) for i, p in enumerate(procs) if p.exitcode not in (None, 0)]
             if dead:
                 raise RuntimeError(f"worker process died: {dead}")
+            if all(p.exitcode is not None for p in procs):
+                try:            # the last message may still be in the pipe
+                    return q.get(timeout=5)
+                except _q.Empty:
+                    raise RuntimeError("all workers exited but results are missing") from None
 
 
 def run_config(n_streams, gpus, cfg_kw, wpg=1):
@@ -155,10 +169,12 @@ def main():
     ap.add_argument("--profile", action="store_true")
     ap.add_argument("--tag", default="default")
     ap.add_argument("--wpg", type=int, default=1, help="worker processes per GPU")
+    ap.add_argument("--assign", choices=["gpu_hungarian", "lapjv"], default="gpu_hungarian",
+                    help="tracker assignment solver")
     a = ap.parse_args()
     cfg_kw = {"engine": str(ROOT / a.engine), "chunk": a.chunk, "max_frames": a.frames,
               "use_reid": not a.no_reid, "overlap": not a.no_overlap, "profile": a.profile,
-              "classes": [0, 1, 2, 3, 5, 7, 14, 15, 16]}
+              "classes": [0, 1, 2, 3, 5, 7, 14, 15, 16], "tracker": {"assign": a.assign}}
     out = ROOT / "results/bench"
     out.mkdir(parents=True, exist_ok=True)
     rows = []
@@ -169,6 +185,8 @@ def main():
         rows.append(r)
         t = {k: sum(v["timing"][k] for v in r["per_gpu"].values()) / len(r["per_gpu"])
              for k in next(iter(r["per_gpu"].values()))["timing"]}
+        t.update({"trk_" + k: sum(v["tracker"].get(k, 0) for v in r["per_gpu"].values()) / len(r["per_gpu"])
+                  for k in ("gpu_pre", "match", "gpu_post")})
         util = " ".join(f"gpu{g}:{s.get('util_mean', 0):.0f}%/dec{s.get('nvdec_mean', 0):.0f}%"
                         for g, s in zip(r["gpus"], r["nvml"]))
         print(f"[{a.tag}] streams={n:2d} gpus={r['gpus']} workers={r['workers']} fps_total={r['fps_total']:.0f} "

@@ -44,11 +44,24 @@ def predict(mean: torch.Tensor, cov: torch.Tensor):
     wh = _wh4(mean[..., 2:4])
     std = torch.cat([STD_POS * wh, STD_VEL * wh], -1)
     Q = torch.diag_embed(std * std)
-    new_mean = mean.clone()
-    new_mean[..., :4] = mean[..., :4] + mean[..., 4:]
-    F = motion_matrix(device=mean.device, dtype=mean.dtype)
-    new_cov = F @ cov @ F.transpose(-1, -2) + Q
-    return new_mean, new_cov
+    new_mean = torch.cat([mean[..., :4] + mean[..., 4:], mean[..., 4:]], -1)
+    return new_mean, _fpf(cov, None) + Q
+
+
+def _fpf(cov: torch.Tensor, d: torch.Tensor | None) -> torch.Tensor:
+    """F P F^T for F = [[I, d I], [0, I]] written block-wise (element-wise ops only: no batched
+    8x8 matmuls, so inductor fuses it).  d: None (= 1) or [..., 1]."""
+    A, B = cov[..., :4, :4], cov[..., :4, 4:]
+    C, D = cov[..., 4:, :4], cov[..., 4:, 4:]
+    if d is None:
+        dB, dC, dD, ddD = B, C, D, D
+    else:
+        dd = d[..., None]
+        dB, dC, dD = dd * B, dd * C, dd * D
+        ddD = dd * dD
+    top = torch.cat([A + dB + dC + ddD, B + dD], -1)
+    bot = torch.cat([C + dD, D], -1)
+    return torch.cat([top, bot], -2)
 
 
 def predict_dt(mean: torch.Tensor, cov: torch.Tensor, dt: torch.Tensor):
@@ -62,16 +75,10 @@ def predict_dt(mean: torch.Tensor, cov: torch.Tensor, dt: torch.Tensor):
     d = dt[..., None]
     s1 = d * (d - 1) / 2
     s2 = (d - 1) * d * (2 * d - 1) / 6
-    new_mean = mean.clone()
-    new_mean[..., :4] = mean[..., :4] + mean[..., 4:] * d
-    Fd = torch.eye(8, device=mean.device, dtype=mean.dtype).expand(*mean.shape[:-1], 8, 8).clone()
-    Fd[..., :4, 4:] = torch.diag_embed(d.expand_as(qp))
-    Qs = torch.zeros_like(cov)
-    Qs[..., :4, :4] = torch.diag_embed(d * qp + qv * s2)
-    Qs[..., :4, 4:] = torch.diag_embed(qv * s1)
-    Qs[..., 4:, :4] = torch.diag_embed(qv * s1)
-    Qs[..., 4:, 4:] = torch.diag_embed(d * qv)
-    return new_mean, Fd @ cov @ Fd.transpose(-1, -2) + Qs
+    new_mean = torch.cat([mean[..., :4] + mean[..., 4:] * d, mean[..., 4:]], -1)
+    q11, q12, q22 = (torch.diag_embed(x) for x in (d * qp + qv * s2, qv * s1, d * qv))
+    Qs = torch.cat([torch.cat([q11, q12], -1), torch.cat([q12, q22], -1)], -2)
+    return new_mean, _fpf(cov, d) + Qs
 
 
 def measurement_cov(mean: torch.Tensor, score: torch.Tensor | None = None,
@@ -160,8 +167,10 @@ def update(mean: torch.Tensor, cov: torch.Tensor, z: torch.Tensor, score: torch.
     Kt = spd_solve(S, PHt.transpose(-1, -2))             # [...,4,8]
     K = Kt.transpose(-1, -2)
     innov = z - pm
-    new_mean = mean + (K @ innov[..., None])[..., 0]
-    new_cov = cov - K @ S @ Kt
+    # element-wise products + small reductions instead of batched matmuls (fusable by inductor);
+    # K S K^T = P H^T S^-1 H P = PHt Kt
+    new_mean = mean + (K * innov[..., None, :]).sum(-1)
+    new_cov = cov - (PHt[..., :, :, None] * Kt[..., None, :, :]).sum(-2)
     new_cov = 0.5 * (new_cov + new_cov.transpose(-1, -2))
     return new_mean, new_cov
 

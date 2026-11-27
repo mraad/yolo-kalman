@@ -20,8 +20,10 @@ by the path length, and the path is flipped.  Every step keeps complementary sla
 result is an optimal assignment (exact; float64 duals, float32 costs).  Not an approximation: no
 epsilon, no iteration cap.
 
-CUDA kernel: one warp per batch element (= stream); columns are strided over the 32 lanes, the
-Dijkstra arg-min is a warp-shuffle reduction (ties -> lowest column index, deterministic).  All
+CUDA kernel: one thread block per batch element (= stream).  All 256 threads find the allowed
+rows/columns (coalesced pass over the padded matrix) and stage the compacted sub-matrix in shared
+memory; then one warp runs the Hungarian search: columns strided over the 32 lanes, the Dijkstra
+arg-min is a warp-shuffle reduction (ties -> lowest column index, deterministic).  All
 data-dependent loops live inside the kernel, so a call is one fixed launch: CUDA-graph capturable,
 no host sync.  Exposed as the torch custom op ``yolo_kalman::lap_batch`` (works under
 torch.compile).  ``lap_batch_torch`` is a pure-PyTorch batched implementation of the same
@@ -45,12 +47,15 @@ _CUDA_SRC = r"""
 
 #define FULL 0xffffffffu
 
-// one warp (blockDim.x == 32) per batch element
-__global__ void lap_sap_kernel(const float* __restrict__ cost, const bool* __restrict__ rmask,
-                               const bool* __restrict__ cmask, int64_t* __restrict__ out,
-                               int R, int C, double limit) {
+#define NT 256          // threads per block: all of them compact / stage, warp 0 solves
+#define SUBMAX 6144     // compacted sub-matrix staged in shared memory if n*m <= SUBMAX (24 KB)
+
+// one block per batch element
+__global__ void __launch_bounds__(NT) lap_sap_kernel(
+    const float* __restrict__ cost, const bool* __restrict__ rmask, const bool* __restrict__ cmask,
+    int64_t* __restrict__ out, int R, int C, double limit) {
   extern __shared__ unsigned char smem[];
-  const int b = blockIdx.x, lane = threadIdx.x;
+  const int b = blockIdx.x, tid = threadIdx.x, lane = tid & 31;
   const float* cb = cost + (size_t)b * R * C;
   const bool* rm = rmask + (size_t)b * R;
   const bool* cm = cmask + (size_t)b * C;
@@ -60,45 +65,58 @@ __global__ void lap_sap_kernel(const float* __restrict__ cost, const bool* __res
   double* u    = (double*)smem;                 // [R+1]   row duals (1-based)
   double* v    = u + (R + 1);                   // [W+1]   column duals (1-based, 0 = virtual)
   double* minv = v + (WMAX + 1);                // [W+1]
-  int* p       = (int*)(minv + (WMAX + 1));     // [W+1]   row assigned to column (0 = free)
+  float* sub   = (float*)(minv + (WMAX + 1));   // [SUBMAX] compacted costs (row-major n x m)
+  int* p       = (int*)(sub + SUBMAX);          // [W+1]   row assigned to column (0 = free)
   int* way     = p + (WMAX + 1);                // [W+1]   predecessor column on the path
   int* ri      = way + (WMAX + 1);              // [R]     compacted row -> original row
   int* cj      = ri + R;                        // [C]     compacted col -> original col
-  unsigned char* used = (unsigned char*)(cj + C);  // [W+1]
+  int* nm      = cj + C;                        // [2]     n, m
+  unsigned char* used = (unsigned char*)(nm + 2);  // [W+1]
+  unsigned char* rowf = used + (WMAX + 1);      // [R]
+  unsigned char* colf = rowf + R;               // [C]
 
-  for (int r = lane; r < R; r += 32) ob[r] = -1;
-  const unsigned lt = (1u << lane) - 1u;
-  // ---- compaction (order preserving): rows / cols that have at least one allowed pair ----
-  int n = 0;
-  for (int base = 0; base < R; base += 32) {
-    int r = base + lane;
-    bool f = false;
-    if (r < R && rm[r]) {
-      const float* row = cb + (size_t)r * C;
-      for (int k = 0; k < C; ++k) {
-        float c = row[k];
-        if (cm[k] && (double)c <= limit) { f = true; break; }
-      }
-    }
-    unsigned bal = __ballot_sync(FULL, f);
-    if (f) ri[n + __popc(bal & lt)] = r;
-    n += __popc(bal);
+  for (int r = tid; r < R; r += NT) { ob[r] = -1; rowf[r] = 0; }
+  for (int k = tid; k < C; k += NT) colf[k] = 0;
+  __syncthreads();
+  // ---- allowed pairs (coalesced over the whole block): row/col has >= 1 allowed pair ----
+  for (int e = tid; e < R * C; e += NT) {
+    int r = e / C, k = e - r * C;
+    if (rm[r] && cm[k] && (double)cb[e] <= limit) { rowf[r] = 1; colf[k] = 1; }
   }
-  int m = 0;
-  for (int base = 0; base < C; base += 32) {
-    int k = base + lane;
-    bool f = false;
-    if (k < C && cm[k]) {
-      for (int r = 0; r < R; ++r) {
-        if (rm[r] && (double)cb[(size_t)r * C + k] <= limit) { f = true; break; }
-      }
+  __syncthreads();
+  // ---- order-preserving compaction (warp 0, ballots over the flags) ----
+  if (tid < 32) {
+    const unsigned lt = (1u << lane) - 1u;
+    int n = 0;
+    for (int base = 0; base < R; base += 32) {
+      int r = base + lane;
+      bool f = r < R && rowf[r];
+      unsigned bal = __ballot_sync(FULL, f);
+      if (f) ri[n + __popc(bal & lt)] = r;
+      n += __popc(bal);
     }
-    unsigned bal = __ballot_sync(FULL, f);
-    if (f) cj[m + __popc(bal & lt)] = k;
-    m += __popc(bal);
+    int m = 0;
+    for (int base = 0; base < C; base += 32) {
+      int k = base + lane;
+      bool f = k < C && colf[k];
+      unsigned bal = __ballot_sync(FULL, f);
+      if (f) cj[m + __popc(bal & lt)] = k;
+      m += __popc(bal);
+    }
+    if (lane == 0) { nm[0] = n; nm[1] = m; }
   }
-  __syncwarp();
+  __syncthreads();
+  const int n = nm[0], m = nm[1];
   if (n == 0 || m == 0) return;
+  const bool staged = n * m <= SUBMAX;
+  if (staged) {
+    for (int e = tid; e < n * m; e += NT) {
+      int i = e / m, j = e - i * m;
+      sub[e] = cb[(size_t)ri[i] * C + cj[j]];
+    }
+  }
+  __syncthreads();
+  if (tid >= 32) return;      // the Hungarian search is warp-synchronous from here on
   const int W = m + n;   // real columns 1..m, dummy columns m+1..m+n (cost 0 = row unmatched)
   for (int i = lane; i <= n; i += 32) u[i] = 0.0;
   for (int j = lane; j <= W; j += 32) { v[j] = 0.0; p[j] = 0; way[j] = 0; }
@@ -115,13 +133,14 @@ __global__ void lap_sap_kernel(const float* __restrict__ cost, const bool* __res
       const int i0 = p[j0];
       const double ui0 = u[i0];
       const float* row = cb + (size_t)ri[i0 - 1] * C;
+      const float* srow = sub + (size_t)(i0 - 1) * m;
       double delta = INF;
       int j1 = 0x7fffffff;
       for (int j = 1 + lane; j <= W; j += 32) {
         if (!used[j]) {
           double a;
           if (j <= m) {
-            float c = row[cj[j - 1]];
+            float c = staged ? srow[j - 1] : row[cj[j - 1]];
             a = ((double)c <= limit) ? (double)c - limit : INF;
           } else {
             a = 0.0;
@@ -167,11 +186,12 @@ torch::Tensor lap_batch_cuda(torch::Tensor cost, torch::Tensor rmask, torch::Ten
   if (B == 0 || R == 0) return out;
   if (C == 0) { out.fill_(-1); return out; }
   const int W = R + C;
-  size_t sh = (size_t)(R + 1) * 8 + (size_t)(W + 1) * 16 + (size_t)(W + 1) * 8 + (size_t)(R + C) * 4 + (W + 1);
+  size_t sh = (size_t)(R + 1) * 8 + (size_t)(W + 1) * 16 + (size_t)SUBMAX * 4 + (size_t)(W + 1) * 8
+              + (size_t)(R + C + 2) * 4 + (W + 1) + R + C;
   auto stream = at::cuda::getCurrentCUDAStream();
   if (sh > 48 * 1024)
     cudaFuncSetAttribute(lap_sap_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, (int)sh);
-  lap_sap_kernel<<<B, 32, sh, stream>>>(c.data_ptr<float>(), rm.data_ptr<bool>(), cmk.data_ptr<bool>(),
+  lap_sap_kernel<<<B, NT, sh, stream>>>(c.data_ptr<float>(), rm.data_ptr<bool>(), cmk.data_ptr<bool>(),
                                         out.data_ptr<int64_t>(), R, C, limit);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
   return out;

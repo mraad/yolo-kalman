@@ -5,8 +5,9 @@
     -> T x MultiStreamTracker.step() (all S streams batched per step)
 
 Images never leave the GPU (only overlay rendering, when enabled, downloads frames).
-With ``overlap=True`` decode+detect+embed of chunk k+1 runs in a producer thread on its own CUDA
-stream while the tracker consumes chunk k.
+With ``overlap=True`` three threads overlap, each on its own CUDA stream: a reader (decode + letterbox
+of chunk k+2 into one of two input buffers), a detector (TensorRT + embeddings of chunk k+1) and the
+tracker (chunk k).
 """
 from __future__ import annotations
 
@@ -78,8 +79,21 @@ class Pipeline:
             self.tracker.reset_stream(i, fps=src.fps)
         self.results = [StreamResult(p, s.fps, s.hw) for p, s in zip(self.paths, self.srcs)]
         H, W = self.det.input_hw
-        self.inbuf = torch.empty(self.S * c.chunk, 3, H, W, dtype=torch.float16, device=self.dev)
+        # two input buffers: the reader thread letterboxes chunk k+1 while TensorRT reads chunk k
+        self.inbufs = [torch.empty(self.S * c.chunk, 3, H, W, dtype=torch.float16, device=self.dev)
+                       for _ in range(2)]
+        self.inbuf = self.inbufs[0]
         self.lb = [letterbox_params(s.hw, (H, W)) for s in self.srcs]
+        # un-letterbox constants, built once (a per-chunk torch.tensor(list, device=cuda) is a pageable
+        # H2D copy that blocks the host until the stream has finished the TensorRT batch)
+        S = self.S
+        r = torch.tensor([lb[0] for lb in self.lb], device=self.dev).view(S, 1, 1, 1)
+        top = torch.tensor([lb[2][0] for lb in self.lb], device=self.dev, dtype=torch.float32).view(S, 1, 1)
+        left = torch.tensor([lb[2][1] for lb in self.lb], device=self.dev, dtype=torch.float32).view(S, 1, 1)
+        hw = torch.tensor([s.hw for s in self.srcs], device=self.dev, dtype=torch.float32)
+        self._lb_r = r
+        self._lb_off = torch.stack([left, top, left, top], -1)
+        self._lb_lim = torch.stack([hw[:, 1], hw[:, 0], hw[:, 1], hw[:, 0]], -1).view(S, 1, 1, 4)
         self.same_size = len({tuple(s.hw) for s in self.srcs}) == 1
         self.keep_frames = keep_frames
         self.timing = {"decode": 0.0, "preprocess": 0.0, "detect": 0.0, "embed": 0.0, "track": 0.0}
@@ -88,6 +102,7 @@ class Pipeline:
         # scheduled ahead of the big TensorRT batches issued by the producer
         lo, hi = torch.cuda.Stream.priority_range()
         self.prod_stream = torch.cuda.Stream(self.dev, priority=lo)
+        self.read_stream = torch.cuda.Stream(self.dev, priority=lo)
         self.track_stream = torch.cuda.Stream(self.dev, priority=hi)
         self.on_chunk = None   # callback(chunk_frames list[S] of uint8 [n,3,H,W] or None, outputs)
 
@@ -97,6 +112,11 @@ class Pipeline:
             torch.cuda.current_stream(self.dev).synchronize()
 
     def _produce(self) -> _Chunk | None:
+        part = self._read_prep(0)
+        return None if part is None else self._detect_embed(part)
+
+    def _read_prep(self, buf: int):
+        """Decode the next chunk of every stream and letterbox it into ``inbufs[buf]``."""
         c, S, T = self.cfg, self.S, self.cfg.chunk
         t0 = time.perf_counter()
         frames = []
@@ -114,11 +134,21 @@ class Pipeline:
         t1 = time.perf_counter()
         n = np.array([0 if f is None else f.shape[0] for f in frames])
         act = [i for i, f in enumerate(frames) if f is not None]   # finished streams are skipped
+        inbuf = self.inbufs[buf]
         for k, i in enumerate(act):
-            letterbox_into(self.inbuf[k * T:k * T + frames[i].shape[0]], frames[i])
+            letterbox_into(inbuf[k * T:k * T + frames[i].shape[0]], frames[i])
         self._sync()
         t2 = time.perf_counter()
-        d = self.det(self.inbuf[:len(act) * T])
+        self.timing["decode"] += t1 - t0
+        self.timing["preprocess"] += t2 - t1
+        return frames, n, act, buf
+
+    def _detect_embed(self, part) -> _Chunk:
+        """Batched detection + un-letterbox + embeddings for a letterboxed chunk."""
+        c, S, T = self.cfg, self.S, self.cfg.chunk
+        frames, n, act, buf = part
+        t2 = time.perf_counter()
+        d = self.det(self.inbufs[buf][:len(act) * T])
         K = d.boxes.shape[1]
         if len(act) < S:  # scatter back to the full [S*T] layout
             idx = torch.as_tensor(act, device=self.dev)
@@ -126,14 +156,8 @@ class Pipeline:
             d = type(d)(*(full(x).flatten(0, 1) for x in (d.boxes, d.scores, d.cls, d.valid)))
         boxes = d.boxes.view(S, T, K, 4)
         # un-letterbox per stream (vectorised)
-        r = torch.tensor([lb[0] for lb in self.lb], device=self.dev).view(S, 1, 1, 1)
-        top = torch.tensor([lb[2][0] for lb in self.lb], device=self.dev, dtype=torch.float32).view(S, 1, 1)
-        left = torch.tensor([lb[2][1] for lb in self.lb], device=self.dev, dtype=torch.float32).view(S, 1, 1)
-        hw = torch.tensor([s.hw for s in self.srcs], device=self.dev, dtype=torch.float32)
-        off = torch.stack([left, top, left, top], -1)
-        boxes = (boxes - off) / r
-        lim = torch.stack([hw[:, 1], hw[:, 0], hw[:, 1], hw[:, 0]], -1).view(S, 1, 1, 4)
-        boxes = torch.minimum(boxes.clamp(min=0), lim)
+        boxes = (boxes - self._lb_off) / self._lb_r
+        boxes = torch.minimum(boxes.clamp(min=0), self._lb_lim)
         ch = _Chunk()
         ch.frames, ch.n = frames, n
         ch.boxes = boxes
@@ -141,9 +165,7 @@ class Pipeline:
         ch.cls = d.cls.view(S, T, K)
         wh = boxes[..., 2:] - boxes[..., :2]
         ch.valid = d.valid.view(S, T, K) & ((wh[..., 0] * wh[..., 1]) >= c.tracker.min_box_area)
-        tvalid = torch.zeros(S, T, dtype=torch.bool)
-        for i in range(S):
-            tvalid[i, :n[i]] = True
+        tvalid = torch.from_numpy(np.arange(T)[None, :] < n[:, None]).pin_memory()   # truly async H2D
         ch.valid &= tvalid.to(self.dev, non_blocking=True)[..., None]
         self._sync()
         t3 = time.perf_counter()
@@ -166,8 +188,6 @@ class Pipeline:
                 self._embed_per_stream(ch, frames, sel, boxes, n)
         self._sync()
         t4 = time.perf_counter()
-        self.timing["decode"] += t1 - t0
-        self.timing["preprocess"] += t2 - t1
         self.timing["detect"] += t3 - t2
         self.timing["embed"] += t4 - t3
         return ch
@@ -182,17 +202,30 @@ class Pipeline:
     def _consume(self, ch: _Chunk):
         t0 = time.perf_counter()
         T = self.cfg.chunk
-        # one host copy of scores/cls/valid for the whole chunk
-        host = torch.stack([ch.scores, ch.cls.float(), ch.valid.float()], -1).cpu().numpy()
-        for t in range(T):
-            active = ch.n > t
-            if not active.any():
-                break
-            outs = self.tracker.step(
-                ch.boxes[:, t], ch.scores[:, t], ch.cls[:, t], ch.valid[:, t],
-                ch.emb[:, t] if ch.emb is not None else None, active=active,
-                scores_np=host[:, t, :, 0], cls_np=host[:, t, :, 1].astype(np.int64),
-                valid_np=host[:, t, :, 2] > 0.5)
+        trk = self.tracker
+        if trk.gpu_assign:
+            # whole chunk enqueued without host syncs (matching runs on the GPU), one collect at the end
+            for t in range(T):
+                active = ch.n > t
+                if not active.any():
+                    break
+                trk.submit(ch.boxes[:, t], ch.scores[:, t], ch.cls[:, t], ch.valid[:, t],
+                           ch.emb[:, t] if ch.emb is not None else None, active=active)
+            steps = trk.collect()
+        else:
+            # one host copy of scores/cls/valid for the whole chunk
+            host = torch.stack([ch.scores, ch.cls.float(), ch.valid.float()], -1).cpu().numpy()
+            steps = []
+            for t in range(T):
+                active = ch.n > t
+                if not active.any():
+                    break
+                steps.append(trk.step(
+                    ch.boxes[:, t], ch.scores[:, t], ch.cls[:, t], ch.valid[:, t],
+                    ch.emb[:, t] if ch.emb is not None else None, active=active,
+                    scores_np=host[:, t, :, 0], cls_np=host[:, t, :, 1].astype(np.int64),
+                    valid_np=host[:, t, :, 2] > 0.5))
+        for outs in steps:
             for i, o in enumerate(outs):
                 if o is not None:
                     self.results[i].tracks.append((o.ids, o.boxes, o.scores, o.cls))
@@ -211,26 +244,59 @@ class Pipeline:
             while (ch := self._produce()) is not None:
                 self._consume(ch)
         else:
+            # reader thread (decode + letterbox, double-buffered input) -> detector thread
+            # (TensorRT + embeddings) -> this thread (tracker); each on its own CUDA stream
             q: queue.Queue = queue.Queue(maxsize=2)
+            q1: queue.Queue = queue.Queue(maxsize=1)
+            free: queue.Queue = queue.Queue()
+            buf_ev = [None, None]
+            for b in range(2):
+                free.put(b)
             err = []
+
+            def reader():
+                try:
+                    torch.cuda.set_device(self.dev)
+                    with torch.cuda.stream(self.read_stream), torch.no_grad():
+                        while True:
+                            b = free.get()
+                            if buf_ev[b] is not None:      # TensorRT finished reading this buffer
+                                self.read_stream.wait_event(buf_ev[b])
+                            part = self._read_prep(b)
+                            if part is None:
+                                q1.put(None)
+                                break
+                            ev = torch.cuda.Event()
+                            ev.record(self.read_stream)
+                            q1.put((part, ev))
+                except Exception as e:  # noqa: BLE001
+                    err.append(e)
+                    q1.put(None)
 
             def producer():
                 try:
                     torch.cuda.set_device(self.dev)
                     with torch.cuda.stream(self.prod_stream), torch.no_grad():
                         while True:
-                            ch = self._produce()
-                            if ch is not None:
-                                ev = torch.cuda.Event()
-                                ev.record(self.prod_stream)
-                                ch.event = ev
-                            q.put(ch)
-                            if ch is None:
+                            item = q1.get()
+                            if item is None:
+                                q.put(None)
                                 break
+                            part, rev = item
+                            self.prod_stream.wait_event(rev)
+                            ch = self._detect_embed(part)
+                            ev = torch.cuda.Event()
+                            ev.record(self.prod_stream)
+                            buf_ev[part[3]] = ev
+                            free.put(part[3])
+                            ch.event = ev
+                            q.put(ch)
                 except Exception as e:  # noqa: BLE001
                     err.append(e)
                     q.put(None)
 
+            th_r = threading.Thread(target=reader, daemon=True)
+            th_r.start()
             th = threading.Thread(target=producer, daemon=True)
             th.start()
             with torch.cuda.stream(self.track_stream):
@@ -241,6 +307,7 @@ class Pipeline:
                     self.track_stream.wait_event(ch.event)
                     self._consume(ch)
             th.join()
+            th_r.join(timeout=10)
             if err:
                 raise err[0]
         torch.cuda.synchronize(self.dev)
