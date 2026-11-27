@@ -1,0 +1,44 @@
+yolo-kalman
+Copyright 2026 mraad (https://github.com/mraad)
+
+Licensed under the Apache License, Version 2.0. See LICENSE.
+
+The Apache License covers the code and text of this repository. It does not
+cover the third-party material below, which keeps its own terms.
+
+Ultralytics YOLO26 and the ultralytics package (AGPL-3.0)
+  The detector is downloaded and installed separately; it is not part of this
+  repository. Software that distributes or serves this tracker together with the
+  Ultralytics detector must meet the AGPL-3.0 terms. The detector sits behind
+  the Detector protocol in src/yolo_kalman/detector.py and can be replaced.
+
+docs/img/strip_g120.jpg, scratch/*_peek.jpg, data/synth/*.json, data/synth/*.gt.txt
+  Made from synthetic clips whose person cut-outs come from bus.jpg and
+  zidane.jpg, assets of the ultralytics package (AGPL-3.0).
+
+docs/img/traffic.jpg
+  Frame of "Traffic on Slovenska street" by Sounds of Changes, CC BY 3.0
+  (https://creativecommons.org/licenses/by/3.0/), via Wikimedia Commons:
+  https://commons.wikimedia.org/wiki/File:Traffic_on_Slovenska_street.webm
+  Changes: one frame, scaled to 640 px, tracking boxes added.
+
+docs/img/doves.jpg
+  Frame of "Starling bathing one sparrow eating two doves walking around" by
+  Julie Andreyev, CC BY 3.0, via Wikimedia Commons:
+  https://commons.wikimedia.org/wiki/File:Starling_bathing_one_sparrow_eating_two_doves_walking_around.webm
+  Changes: one frame, scaled to 640 px, tracking boxes added.
+
+docs/img/station.jpg
+  Frame of "Soundscapes of Norrkoping (4) - Train station" by Erik Palsson,
+  CC BY 3.0, via Wikimedia Commons:
+  https://commons.wikimedia.org/wiki/File:Soundscapes_of_Norrk%C3%B6ping_(4)_-_Train_station.webm
+  Changes: one frame, scaled to 640 px, tracking boxes added.
+
+results/**/*.mot.txt and results/real*/summary.json
+  Track outputs computed from the Wikimedia Commons clips listed in
+  meta/clips_index.tsv (CC BY 2.0/3.0/4.0, CC BY-SA 3.0/4.0). The clips are not
+  part of this repository.
+
+Models and dependencies (PyTorch, torchvision ResNet-18 weights, TensorRT,
+PyNvVideoCodec, CUDA libraries) are downloaded when the project runs, and each
+keeps its own license.

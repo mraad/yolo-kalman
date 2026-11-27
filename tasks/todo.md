@@ -55,8 +55,8 @@ Decisions (made unattended):
   with c > limit are forbidden; implemented with n zero-cost dummy columns (row unmatched).
 - Whole cascade (S1..S5, new tracks, id recovery, bookkeeping) ported to GPU tensors for
   assign="gpu_hungarian"; assign="lapjv" keeps the old CPU cascade byte-for-byte as the reference.
-- [x] CUDA kernel + torch custom op + torch fallback (torch variant measured 300x slower: host sync per Dijkstra step)
-- [x] solver tests vs scipy / lapjv (tests/test_assign.py, 7 tests)
+- [x] CUDA kernel + torch custom op (a pure-torch variant was measured 300x slower: host sync per Dijkstra step; removed in the audit)
+- [x] solver tests vs scipy / lapjv (tests/test_assign.py)
 - [x] GPU cascade in tracker, assign option, equivalence vs lapjv path (frame-identical on synthetic scenes)
 - [x] async step (one sync per chunk) in pipeline
 - [x] CLI flags track.py / bench.py / eval_synth.py
@@ -69,3 +69,27 @@ Decisions (made unattended):
   alternatives; full runs 591/595 ids (gpu) vs 619/601 (lapjv): run-to-run noise (pipeline not deterministic)
 - Not done: fused single-kernel cascade (next step if more tracker speed is needed under TRT contention);
   root cause of 3 fast rc=1 benchmark failures right after the queue-flush fix not recorded.
+
+## Audit fixes (2026-11-27)
+- [x] solver: stage costs in shared memory up to the device opt-in limit (99 KB on RTX PRO 6000 = ~22.6k
+  cells), global-memory path above it; clear error if even the fixed arrays do not fit
+- [x] test_crowd_size_dense: both kernel paths, size for the global path derived from the device limit
+- [x] e2e tests fail instead of skip with REQUIRE_E2E=1 (engine/clips are gitignored)
+- [x] removed lap_batch_torch (no caller outside tests); lap_batch raises on CPU tensors
+- [x] removed dead code: unletterbox_boxes, motion_matrix, Pipeline keep_frames, Detections.__getitem__
+- [x] bench.py --repeats (median-FPS run reported, all runs in fps_runs); engine path recorded relative
+- [x] pytest / motmetrics moved to the uv dev group
+- [x] /simplify pass: cached device props (CUDAGuard + sharedMemPerBlockOptin), comments, test cleanup
+- [x] verified: 23/23 tests strict; synth metrics identical to before; bench median of 3 (5,272 fps at 16
+  streams, 5,664 at 32; lapjv 3,200 / 3,798) -> results/bench/bench_audit_*.json
+
+## Docs and release prep
+- [x] docs/index.html manual (STE100 style; diagrams, procedures, config, results); source
+  docs/index.src.html, rebuild with `python3 docs/build_docs.py`
+- [x] README: solver usage example + how the cascade calls it
+- [x] PII review: git history author rewritten to the GitHub noreply identity, server paths and
+  host names scrubbed from all commits and files
+- [x] LICENSE (Apache-2.0) + NOTICE (third-party material)
+- [ ] open: synthetic clips and docs/img/strip_g120.jpg use person cut-outs from Ultralytics
+  bus.jpg / zidane.jpg (AGPL-3.0 assets, real people); replace before a public release if needed
+- [ ] open: CLAUDE.md says "Do not push the repo"; change it when the repo goes public
