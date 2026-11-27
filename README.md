@@ -1,5 +1,13 @@
 # yolo-kalman — native YOLO + GPU Kalman multi-object tracker with occlusion-robust ids
 
+![Tracker output on a street clip: a bus passes in front of a pedestrian, and the pedestrian keeps id 27 after the bus has gone](docs/img/tracking.gif)
+
+*Tracker output, frames 881–1056 of "Traffic on Slovenska street" by Sounds of Changes
+([CC BY 3.0](https://creativecommons.org/licenses/by/3.0/), via
+[Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Traffic_on_Slovenska_street.webm)).
+The bus hides pedestrian 27 on the left. Pedestrian 27 has the same id when the bus has gone.
+Changes: tracking boxes, ids and trails added; scaled to 480 px; 10 fps.*
+
 Full manual (diagrams, procedures, configuration, results): [`docs/index.html`](docs/index.html).
 Rebuild it with `python3 docs/build_docs.py` after editing `docs/index.src.html`.
 
