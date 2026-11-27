@@ -115,8 +115,9 @@ class Pipeline:
         part = self._read_prep(0)
         return None if part is None else self._detect_embed(part)
 
-    def _read_prep(self, buf: int):
-        """Decode the next chunk of every stream and letterbox it into ``inbufs[buf]``."""
+    def _read_prep(self, buf: int, buf_free: torch.cuda.Event | None = None):
+        """Decode the next chunk of every stream and letterbox it into ``inbufs[buf]`` (after
+        ``buf_free``: TensorRT finished reading that buffer)."""
         c, S, T = self.cfg, self.S, self.cfg.chunk
         t0 = time.perf_counter()
         frames = []
@@ -135,6 +136,8 @@ class Pipeline:
         n = np.array([0 if f is None else f.shape[0] for f in frames])
         act = [i for i, f in enumerate(frames) if f is not None]   # finished streams are skipped
         inbuf = self.inbufs[buf]
+        if buf_free is not None:
+            torch.cuda.current_stream(self.dev).wait_event(buf_free)
         for k, i in enumerate(act):
             letterbox_into(inbuf[k * T:k * T + frames[i].shape[0]], frames[i])
         self._sync()
@@ -260,9 +263,7 @@ class Pipeline:
                     with torch.cuda.stream(self.read_stream), torch.no_grad():
                         while True:
                             b = free.get()
-                            if buf_ev[b] is not None:      # TensorRT finished reading this buffer
-                                self.read_stream.wait_event(buf_ev[b])
-                            part = self._read_prep(b)
+                            part = self._read_prep(b, buf_ev[b])
                             if part is None:
                                 q1.put(None)
                                 break

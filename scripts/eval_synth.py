@@ -75,8 +75,8 @@ def occlusion_check(gt, tr, hidden, iou_thr=0.5, window=15):
     return out
 
 
-def run_variant(name, kw, overlay_dir=None, min_vis=0.3):
-    kw = dict(kw)
+def run_variant(name, kw, overlay_dir=None, min_vis=0.3, assign="gpu_hungarian"):
+    kw = dict(kw, assign=assign)
     reid = kw.pop("_reid", True)
     cfg = PipelineConfig(use_reid=reid, classes=[0], tracker=TrackerConfig(**kw))
     paths = [str(SYN / f"{c}.mp4") for c in CLIPS]
@@ -117,13 +117,15 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--overlay", action="store_true")
     ap.add_argument("--min-vis", type=float, default=0.3)
+    ap.add_argument("--assign", choices=["gpu_hungarian", "lapjv"], default="gpu_hungarian")
     a = ap.parse_args()
+    sfx = "" if a.assign == "gpu_hungarian" else f"_{a.assign}"
     out = ROOT / "results/synth"
     out.mkdir(parents=True, exist_ok=True)
     allres = {}
     for i, (vname, kw) in enumerate(VARIANTS.items()):
-        allres[vname] = run_variant(vname, kw, out if (a.overlay and i == 0) else None, a.min_vis)
-    (out / "metrics.json").write_text(json.dumps(allres, indent=1, default=str))
+        allres[vname] = run_variant(vname, kw, out if (a.overlay and i == 0) else None, a.min_vis, a.assign)
+    (out / f"metrics{sfx}.json").write_text(json.dumps(allres, indent=1, default=str))
     lines = ["| variant | clip | HOTA | AssA | DetA | IDF1 | MOTA | IDSW | frag | GT ids | pred ids | same id after full occlusion (1 s later / immediately) |",
              "|---|---|---|---|---|---|---|---|---|---|---|---|"]
     for vname, rows in allres.items():
@@ -131,7 +133,7 @@ def main():
             lines.append(f"| {vname} | {c} | {r['HOTA']:.3f} | {r['AssA']:.3f} | {r['DetA']:.3f} | {r['idf1']:.3f} | "
                          f"{r['mota']:.3f} | {int(r['num_switches'])} | {int(r['num_fragmentations'])} | "
                          f"{int(r['num_unique_objects'])} | {r['pred_ids']} | {r['occl_same_id']} / {r['occl_same_id_immediate']} |")
-    (out / "metrics.md").write_text("\n".join(lines) + "\n")
+    (out / f"metrics{sfx}.md").write_text("\n".join(lines) + "\n")
     print("\n".join(lines))
 
 

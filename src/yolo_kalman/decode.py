@@ -39,7 +39,12 @@ class NvDecSource:
             self.done = True
             return None
         with torch.cuda.device(self.device):
-            return torch.stack([torch.from_dlpack(f) for f in frames])
+            out = torch.stack([torch.from_dlpack(f) for f in frames])
+            # the copy out of the decoder's surface pool is async: finish it before the decoder may
+            # recycle those surfaces (next get_batch_frames).  Without this, a reader thread that
+            # never syncs otherwise got corrupted frames.
+            torch.cuda.current_stream(self.device).synchronize()
+            return out
 
 
 class CpuSource:
