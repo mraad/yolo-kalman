@@ -1,5 +1,8 @@
 # yolo-kalman — native YOLO + GPU Kalman multi-object tracker with occlusion-robust ids
 
+Full manual (diagrams, procedures, configuration, results): [`docs/index.html`](docs/index.html).
+Rebuild it with `python3 docs/build_docs.py` after editing `docs/index.src.html`.
+
 YOLO (Ultralytics YOLO26m) is used **only as the detector**. The tracker is my own code
 (no `model.track()`, no boxmot). It runs in PyTorch on the GPU, batched over tracks and over
 streams:
@@ -42,7 +45,10 @@ masks: each stream's live tracks and still-free detections are `row_mask [S,M]` 
 over the fixed padded `[S,M,N]` cost tensor.
 
 **Kernel.** One thread block per stream, so all streams are solved in one launch. 256 threads find
-the allowed rows/columns (one coalesced pass) and stage the compacted sub-matrix in shared memory.
+the allowed rows/columns (one coalesced pass) and stage the compacted sub-matrix in shared memory
+when it fits the device's per-block limit (99 KB on the RTX PRO 6000: up to ~22.6k cells, 150×150).
+Bigger problems (up to the 160×160 slot/detection limit) read the padded matrix in global memory
+through the column index; `tests/test_assign.py::test_crowd_size_dense` covers both paths.
 Then one warp runs the search: columns are strided over the lanes, and the Dijkstra arg-min is a
 warp-shuffle reduction where ties go to the lowest column index (deterministic). All data-dependent
 loops live inside the kernel, so a solve is one fixed launch: it can be captured in a CUDA graph and
@@ -50,12 +56,46 @@ needs no host sync. It is registered as the torch custom op `yolo_kalman::lap_ba
 `torch.compile` traces the cascade around it. The kernel is JIT-built with `torch.utils.cpp_extension`
 (nvcc, cached in `~/.cache/torch_extensions`).
 
-**Why a CUDA kernel (measured).** `lap_batch_torch` is the same algorithm vectorised over streams in
-plain PyTorch. Its loop length depends on the data, so it needs a host sync per Dijkstra step: 49 ms
-for 8×(20×20) and 171 ms for 16×(40×40) dense random problems, against 0.15 / 0.57 ms for the CUDA
-kernel and 0.14 / 0.54 ms for lapjv. It is kept as the CPU fallback and as a second reference in the
-tests. I did not try Triton: the search is scalar pointer-chasing (path back-tracking, a single "current
-row"), which fits a warp-synchronous CUDA loop better than Triton's block programming model. On
+**Using the solver.** `lap_batch(cost, row_mask, col_mask, limit)` takes CUDA tensors only:
+`cost [S,R,C]` float32 (low = good), `row_mask [S,R]` and `col_mask [S,C]` bool (which rows and
+columns take part), and one `limit` for all streams. It returns `[S,R]` int64: the matched column of
+each row, or `-1` (unmatched, masked, or every allowed pair above `limit`). It is the same optimum as
+calling `lap.lapjv(cost[s][rows][:, cols], extend_cost=True, cost_limit=limit)` per stream.
+```python
+import torch
+from yolo_kalman.assign import lap_batch
+
+# 2 streams, 3 tracks (rows) x 4 detections (columns); cost = 1 - IoU
+cost = torch.tensor([[[0.10, 0.90, 0.95, 0.70],
+                      [0.85, 0.20, 0.90, 0.95],
+                      [0.90, 0.90, 0.90, 0.90]],
+                     [[0.30, 0.25, 9e4, 9e4],
+                      [0.20, 0.40, 9e4, 9e4],
+                      [9e4, 9e4, 9e4, 9e4]]], device="cuda")
+rows = torch.tensor([[True, True, True], [True, True, False]], device="cuda")  # tracks in this stage
+cols = torch.ones(2, 4, dtype=torch.bool, device="cuda")                      # free detections
+print(lap_batch(cost, rows, cols, 0.8).tolist())   # [[0, 1, -1], [1, 0, -1]]
+```
+Stream 0, row 2 stays unmatched because all its costs are above 0.8. Stream 1 picks row 0 → column 1
+and row 1 → column 0 (0.25 + 0.20 = 0.45), not the diagonal (0.30 + 0.40 = 0.70); row 2 is masked out.
+
+How the tracker uses it (`MultiStreamTracker._gmatch_core`): each cascade stage builds its cost plane
+for all streams, sets gated pairs (Mahalanobis gate, other class group, no embedding) to `BIG = 6e4`
+(above any limit, so they are forbidden), and calls `lap_batch` with `row_mask = stage tracks & not
+yet matched` and `col_mask = stage detections & not yet used`, and the stage limit (S1 0.8, S2 0.5,
+S3 0.7, S4 0.25, S5 0.7). The result marks rows matched and columns used for the next stage. Id
+recovery is a sixth call: rows = LOST tracks, columns = young TRACKED tracks, cost = embedding
+distance, limit 0.25. Inside the tracker the six calls are recorded in the *match* CUDA graph.
+Select the CPU reference instead with `TrackerConfig(assign="lapjv")` or `--assign lapjv` on
+`scripts/track.py`, `scripts/bench.py` and `scripts/eval_synth.py`.
+
+**Why a CUDA kernel (measured).** A pure-PyTorch version of the same algorithm, vectorised over
+streams, was measured and then removed (it had no caller outside the tests). Its loop length depends
+on the data, so it needs a host sync per Dijkstra step: 49 ms for 8×(20×20) and 171 ms for
+16×(40×40) dense random problems, against 0.15 / 0.57 ms for the CUDA kernel and 0.14 / 0.54 ms for
+lapjv. `lap_batch` now raises on CPU tensors. I did not try Triton: the search is scalar
+pointer-chasing (path back-tracking, a single "current row"), which fits a warp-synchronous CUDA loop
+better than Triton's block programming model. On
 tracking-like sparse costs (true pair cheap, three plausible distractors per row, the rest gated), one
 launch for all streams against lapjv called per stream in a Python loop:
 
@@ -121,18 +161,22 @@ dropped in. I did not build one; see "not done".
 
 ## Commands
 ```bash
-~/.local/bin/uv sync                                   # env (torch 2.14+cu130, TensorRT 11.5, PyNvVideoCodec)
+~/.local/bin/uv sync                                   # env (torch 2.14+cu130, TensorRT 11.5, PyNvVideoCodec); dev group: pytest, motmetrics
 ./run.sh scripts/download_clips.py                     # Wikimedia 480p VP9 transcodes -> clips/ (untrusted data)
 cd models && ../run.sh ../scripts/export_trt.py yolo26m.pt --nms-free && cd ..   # TRT FP16 engine
 ./run.sh scripts/make_synthetic.py                     # synthetic occlusion clips + GT -> data/synth
-./run.sh -m pytest -q                                  # 24 tests (KF, solver vs scipy/lapjv, synthetic, e2e)
+REQUIRE_E2E=1 ./run.sh -m pytest -rs -q               # 23 tests (KF, solver vs scipy/lapjv, synthetic, e2e)
 ./run.sh scripts/eval_synth.py --overlay               # HOTA/IDF1/IDSW + ablations -> results/synth (--assign lapjv)
 ./run.sh scripts/track.py clips/*.webm --out results/real --overlay   # all clips as parallel streams
-./run.sh scripts/bench.py --streams 1 4 8 16 32 --gpus 0 1 --frames 1200 --assign gpu_hungarian  # or --assign lapjv
-./run.sh scripts/bench_table.py "final_gpu_hungarian_s*"   # markdown table from bench JSONs
+./run.sh scripts/bench.py --streams 1 4 8 16 32 --gpus 0 1 --frames 1200 --repeats 3 --assign gpu_hungarian  # or --assign lapjv
+./run.sh scripts/bench_table.py "audit_gpu_hungarian"      # markdown table from results/bench/bench_<tag>*.json
 ```
 `run.sh` = `.venv/bin/python -I` with `LD_LIBRARY_PATH` unset. The host path puts cuDNN 9.20 ahead of
 the venv's 9.24, which breaks every conv.
+
+The two e2e tests need gitignored files (`models/*.engine`, `clips/`, `data/synth/*.mp4`). Without them
+they skip, and a plain `pytest` still looks green. `REQUIRE_E2E=1` turns a missing file into a failure;
+`-rs` lists any skip. Treat a skip as "occlusion claim not verified".
 
 ## Results
 
@@ -227,7 +271,8 @@ matches, 175 young-track id recoveries, 0 dropped detections, 0 slot overflows.
 process per GPU (streams split across GPU 0/1). NVML is sampled every 100 ms during the run. Stage
 columns are per-worker sums of wall time. Reader (decode/letterbox), detector (TRT/embed) and tracker
 threads overlap, so the columns add up to more than the wall time. Same code for both rows, only
-`--assign` differs (final runs: `bench_final_*`).
+`--assign` differs. Each setting ran 3 times; the table shows the median-FPS run (all three in
+`fps_runs` of `bench_audit_*.json`; run-to-run spread ≤ 6%).
 
 **Tracker split.** For `gpu_hungarian` the three numbers are **GPU time** between CUDA events around the
 three graphs (pre / match / post). They include time the tiny tracker kernels spend waiting for SMs
@@ -238,27 +283,27 @@ host wall time (graph A + sync / CPU cascade / graph B + sync).
 
 | solver | streams | GPUs | frames | wall s | FPS total | FPS/stream | GPU util % (mean per GPU) | NVDEC % | decode s | letterbox s | detect s | embed s | track s | tracker pre / match / post s |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| gpu_hungarian | 1 | 1 | 1200 | 1.0 | 1233 | 1233 | 45 | 4 | 0.08 | 0.03 | 0.37 | 0.58 | 0.61 | 0.09 / 0.18 / 0.20 |
-| gpu_hungarian | 4 | 2 | 4800 | 1.3 | 3688 | 922 | 70 / 63 | 9 / 9 | 0.12 | 0.06 | 0.53 | 0.74 | 0.97 | 0.19 / 0.29 / 0.28 |
-| gpu_hungarian | 8 | 2 | 9600 | 2.1 | 4545 | 568 | 81 / 77 | 13 / 12 | 0.32 | 0.18 | 1.07 | 1.00 | 1.78 | 0.48 / 0.47 / 0.46 |
-| gpu_hungarian | 16 | 2 | 19200 | 3.6 | 5270 | 329 | 84 / 83 | 14 / 14 | 0.86 | 0.49 | 2.36 | 1.25 | 3.44 | 0.63 / 1.13 / 1.14 |
-| gpu_hungarian | 32 | 2 | 38400 | 6.7 | 5702 | 178 | 92 / 91 | 15 / 16 | 1.58 | 0.42 | 4.35 | 2.32 | 5.72 | 1.39 / 1.70 / 1.95 |
+| gpu_hungarian | 1 | 1 | 1200 | 1.0 | 1236 | 1236 | 53 | 5 | 0.07 | 0.03 | 0.36 | 0.58 | 0.61 | 0.09 / 0.19 / 0.20 |
+| gpu_hungarian | 4 | 2 | 4800 | 1.3 | 3687 | 922 | 71 / 62 | 9 / 9 | 0.12 | 0.06 | 0.54 | 0.73 | 0.97 | 0.19 / 0.28 / 0.29 |
+| gpu_hungarian | 8 | 2 | 9600 | 2.1 | 4582 | 573 | 75 / 76 | 12 / 12 | 0.32 | 0.20 | 1.08 | 0.99 | 1.79 | 0.47 / 0.47 / 0.46 |
+| gpu_hungarian | 16 | 2 | 19200 | 3.6 | 5272 | 329 | 85 / 82 | 14 / 14 | 0.99 | 0.47 | 2.30 | 1.31 | 3.43 | 0.63 / 1.11 / 1.16 |
+| gpu_hungarian | 32 | 2 | 38400 | 6.8 | 5664 | 177 | 91 / 89 | 15 / 15 | 1.66 | 0.39 | 4.39 | 2.21 | 5.66 | 1.37 / 1.64 / 1.92 |
 
 **Reference, `--assign lapjv`** (same pipeline, CPU cascade):
 
 | solver | streams | GPUs | frames | wall s | FPS total | FPS/stream | GPU util % (mean per GPU) | NVDEC % | decode s | letterbox s | detect s | embed s | track s | tracker pre / match / post s |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| lapjv | 1 | 1 | 1200 | 1.4 | 883 | 883 | 42 | 4 | 0.06 | 0.03 | 0.32 | 0.85 | 1.26 | 0.34 / 0.67 / 0.15 |
-| lapjv | 4 | 2 | 4800 | 2.0 | 2448 | 612 | 47 / 45 | 6 / 6 | 0.11 | 0.07 | 0.46 | 1.06 | 1.68 | 0.44 / 0.91 / 0.22 |
-| lapjv | 8 | 2 | 9600 | 3.3 | 2879 | 360 | 53 / 51 | 7 / 7 | 0.21 | 0.13 | 0.40 | 1.91 | 3.09 | 0.69 / 1.84 / 0.45 |
-| lapjv | 16 | 2 | 19200 | 6.1 | 3164 | 198 | 58 / 55 | 8 / 8 | 0.48 | 0.28 | 0.39 | 3.39 | 5.78 | 1.15 / 3.61 / 0.89 |
-| lapjv | 32 | 2 | 38400 | 9.9 | 3870 | 121 | 66 / 68 | 10 / 10 | 1.00 | 0.50 | 0.76 | 5.99 | 9.69 | 1.44 / 6.75 / 1.37 |
+| lapjv | 1 | 1 | 1200 | 1.4 | 868 | 868 | 40 | 4 | 0.09 | 0.05 | 0.32 | 0.86 | 1.28 | 0.35 / 0.68 / 0.16 |
+| lapjv | 4 | 2 | 4800 | 2.0 | 2437 | 609 | 47 / 47 | 5 / 7 | 0.12 | 0.07 | 0.46 | 1.07 | 1.70 | 0.44 / 0.92 / 0.22 |
+| lapjv | 8 | 2 | 9600 | 3.4 | 2837 | 355 | 51 / 50 | 7 / 7 | 0.22 | 0.13 | 0.35 | 1.91 | 3.09 | 0.69 / 1.84 / 0.45 |
+| lapjv | 16 | 2 | 19200 | 6.0 | 3200 | 200 | 57 / 55 | 8 / 8 | 0.45 | 0.27 | 0.40 | 3.39 | 5.72 | 1.15 / 3.56 / 0.89 |
+| lapjv | 32 | 2 | 38400 | 10.1 | 3798 | 119 | 66 / 66 | 9 / 9 | 1.10 | 0.49 | 0.77 | 5.98 | 9.65 | 1.43 / 6.73 / 1.36 |
 
 | streams | 1 | 4 | 8 | 16 | 32 |
 |---|---|---|---|---|---|
-| FPS gpu_hungarian | 1,233 | 3,688 | 4,545 | 5,270 | 5,702 |
-| FPS lapjv | 883 | 2,448 | 2,879 | 3,164 | 3,870 |
-| speed-up | 1.40× | 1.51× | 1.58× | 1.67× | 1.47× |
+| FPS gpu_hungarian | 1,236 | 3,687 | 4,582 | 5,272 | 5,664 |
+| FPS lapjv | 868 | 2,437 | 2,837 | 3,200 | 3,798 |
+| speed-up | 1.42× | 1.51× | 1.62× | 1.65× | 1.49× |
 | previous README (lapjv, single producer thread) | 845 | 2,268 | 2,669 | 3,015 | 3,519 |
 
 The tracker alone (`scratch/prof_trk.py`, 8 streams, synthetic detections with clutter, compiled + CUDA
@@ -317,7 +362,8 @@ but I have not proven the root cause.
   detector is isolated behind `detector.Detector` so a permissively licensed one (YOLOX Apache-2.0,
   RT-DETR/D-FINE Apache-2.0 via HF transformers) can replace it. The synthetic clips use person sprites
   cut from Ultralytics' bundled `bus.jpg`/`zidane.jpg` (AGPL-3.0 package assets).
-* Own tracker code: no licence chosen (the user's call). torchvision ResNet-18 weights: BSD-3 (torchvision).
+* Own tracker code: [Apache-2.0](LICENSE). Third-party material and its terms: [`NOTICE`](NOTICE).
+  torchvision ResNet-18 weights: BSD-3 (torchvision).
 * Clips: see `meta/clips_index.tsv` (CC BY 2.0/3.0/4.0, CC BY-SA 3.0/4.0, with Wikimedia Commons
   description pages for attribution). They are not committed. Two listed clips (Hofer Verkehrswendetag
   C0258/C0270) have no Wikimedia transcodes (404 for every variant), and their 4K originals are
@@ -337,8 +383,8 @@ but I have not proven the root cause.
   differ from lapjv's; none of the synthetic suites contains such a case that changes ids.
 * The GPU cascade always runs the ORU branch of the post graph (masked per slot). The lapjv path only
   runs it on frames that need it.
-* The CUDA kernel is JIT-built on first use (≈40 s, needs nvcc from /usr/local/cuda). Without CUDA,
-  `lap_batch` falls back to the pure-PyTorch implementation, which is slow.
+* The CUDA kernel is JIT-built on first use (≈40 s, needs nvcc from /usr/local/cuda). `lap_batch`
+  needs CUDA tensors; on the CPU use `assign="lapjv"`.
 * The end-to-end pipeline is not bit-deterministic run to run (lapjv against itself already diverges
   within 5–170 frames on real clips, even with the sequential pipeline). That is detector/embedding
   numerics, not the solver. Solver comparisons on real data therefore use recorded-input replays (see

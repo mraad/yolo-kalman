@@ -1,0 +1,826 @@
+<title>yolo-kalman Manual</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@500;600;700&family=Source+Sans+3:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: one reading column (~70ch) with a sticky contents rail on wide screens; figures may run wider than the text. */
+:root {
+  --paper: #f5f7f8;
+  --sheet: #ffffff;
+  --ink: #18222c;
+  --ink-2: #4c5966;
+  --rule: #d5dce2;
+  --accent: #0b6b74;
+  --accent-soft: #e2f0f1;
+  --warn: #8a4b00;
+  --warn-soft: #fbf0df;
+  --code-bg: #eef2f4;
+  --s1: #257de0;
+  --s2: #f47230;
+  --hide: #9aa5ae;
+  --f-head: "Barlow Semi Condensed", "Arial Narrow", Arial, sans-serif;
+  --f-body: "Source Sans 3", "Segoe UI", Helvetica, Arial, sans-serif;
+  --f-mono: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --paper: #11171c; --sheet: #182027; --ink: #e4eaee; --ink-2: #a4b0ba; --rule: #2e3a44;
+  --accent: #5cc3cc; --accent-soft: #173238; --warn: #f0b562; --warn-soft: #33281a; --code-bg: #1f2931;
+  --s1: #338ced; --s2: #e76624; --hide: #66737d; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --paper: #11171c; --sheet: #182027; --ink: #e4eaee; --ink-2: #a4b0ba; --rule: #2e3a44;
+  --accent: #5cc3cc; --accent-soft: #173238; --warn: #f0b562; --warn-soft: #33281a; --code-bg: #1f2931;
+  --s1: #338ced; --s2: #e76624; --hide: #66737d; color-scheme: dark }
+
+body { background: var(--paper); color: var(--ink); font: 400 17px/1.6 var(--f-body); }
+.wrap { max-width: 1180px; margin: 0 auto; padding-block: 32px 64px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 48px; }
+nav.toc { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 16px); align-self: start; font-size: 14px; }
+nav.toc p { font: 600 12px/1 var(--f-head); letter-spacing: .08em; text-transform: uppercase; color: var(--ink-2); margin: 0 0 10px; }
+nav.toc ol { margin: 0; padding-left: 1.4em; display: grid; gap: 4px; }
+nav.toc a { color: var(--ink); text-decoration: none; }
+nav.toc a:hover, nav.toc a:focus-visible { color: var(--accent); text-decoration: underline; }
+main { min-width: 0; }
+@media (max-width: 900px) { .wrap { grid-template-columns: minmax(0, 1fr); gap: 24px; } nav.toc { position: static; } }
+
+header.doc { border-bottom: 2px solid var(--ink); padding-bottom: 20px; margin-bottom: 8px; }
+.eyebrow { font: 600 13px/1 var(--f-head); letter-spacing: .1em; text-transform: uppercase; color: var(--accent); margin: 0 0 8px; }
+h1 { font: 700 44px/1.05 var(--f-head); margin: 0 0 12px; text-wrap: balance; }
+h2 { font: 700 30px/1.15 var(--f-head); margin: 56px 0 12px; padding-top: 12px; border-top: 1px solid var(--rule); text-wrap: balance; }
+h3 { font: 600 21px/1.25 var(--f-head); margin: 32px 0 8px; text-wrap: balance; }
+h2 .num, h3 .num { color: var(--accent); font-variant-numeric: tabular-nums; margin-right: .35em; }
+p, li { max-width: 70ch; }
+p { margin: 0 0 12px; }
+ul, ol { margin: 0 0 14px; padding-left: 1.4em; }
+li { margin-bottom: 4px; }
+a { color: var(--accent); }
+code, kbd, .mono { font-family: var(--f-mono); font-size: .86em; }
+code { background: var(--code-bg); padding: .08em .3em; border-radius: 3px; }
+pre { background: var(--code-bg); padding: 12px 14px; border-radius: 4px; overflow-x: auto; font: 400 13.5px/1.5 var(--f-mono); margin: 0 0 14px; }
+pre code { background: none; padding: 0; font-size: inherit; }
+.lede { font-size: 19px; color: var(--ink-2); max-width: 70ch; }
+.meta { font-size: 14px; color: var(--ink-2); margin-top: 10px; }
+
+.facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin: 20px 0 8px; }
+.fact { background: var(--sheet); border: 1px solid var(--rule); border-radius: 4px; padding: 12px 14px; }
+.fact b { display: block; font: 700 28px/1.1 var(--f-head); font-variant-numeric: tabular-nums; }
+.fact span { font-size: 14px; color: var(--ink-2); }
+
+.note, .caution { border-left: 4px solid var(--accent); background: var(--accent-soft); padding: 10px 14px; margin: 14px 0; max-width: 72ch; border-radius: 0 4px 4px 0; }
+.caution { border-left-color: var(--warn); background: var(--warn-soft); }
+.note > b, .caution > b { font: 700 13px/1 var(--f-head); letter-spacing: .08em; text-transform: uppercase; display: block; margin-bottom: 4px; }
+.caution > b { color: var(--warn); }
+.note > b { color: var(--accent); }
+
+ol.steps { counter-reset: s; list-style: none; padding-left: 0; }
+ol.steps > li { counter-increment: s; position: relative; padding-left: 2.4em; margin-bottom: 8px; }
+ol.steps > li::before { content: counter(s); position: absolute; left: 0; top: .05em; width: 1.7em; height: 1.7em; border-radius: 50%;
+  background: var(--ink); color: var(--paper); font: 600 13px/1.7em var(--f-head); text-align: center; }
+ol.steps pre { margin-top: 6px; }
+
+.tbl { overflow-x: auto; margin: 12px 0 18px; border: 1px solid var(--rule); border-radius: 4px; background: var(--sheet); }
+table { border-collapse: collapse; width: 100%; font-size: 14.5px; }
+th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+th { font: 600 13px/1.3 var(--f-head); letter-spacing: .03em; color: var(--ink-2); background: var(--code-bg); }
+td.n, th.n { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+tr:last-child td { border-bottom: 0; }
+tr.em td { font-weight: 600; }
+
+figure { margin: 20px 0 24px; }
+figure.img img { display: block; width: 100%; max-width: 760px; height: auto; border-radius: 4px; border: 1px solid var(--rule); }
+figure.wide img { max-width: 100%; }
+.pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
+.pair figure { margin: 0; }
+figcaption { font-size: 14.5px; color: var(--ink-2); margin-top: 8px; max-width: 76ch; }
+figcaption b { color: var(--ink); }
+.dia { overflow-x: auto; background: var(--sheet); border: 1px solid var(--rule); border-radius: 4px; padding: 12px; }
+.dia svg { display: block; width: 100%; height: auto; min-width: 620px; color: var(--ink); font-family: var(--f-body); }
+.dia svg text { fill: currentColor; font-size: 13px; }
+.dia svg .t-sm { font-size: 11.5px; fill: var(--ink-2); }
+.dia svg .t-hd { font-family: var(--f-head); font-weight: 600; font-size: 14.5px; }
+.dia svg .box { fill: var(--sheet); stroke: currentColor; stroke-width: 1.4; }
+.dia svg .box-a { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1.6; }
+.dia svg .ln { stroke: currentColor; stroke-width: 1.4; fill: none; }
+.dia svg .ln-a { stroke: var(--accent); stroke-width: 1.8; fill: none; }
+.dia svg .ln-d { stroke: currentColor; stroke-width: 1.2; fill: none; stroke-dasharray: 4 3; }
+.dia svg .fill-hide { fill: var(--hide); }
+.dia svg .fill-a { fill: var(--accent); }
+.dia svg .ah { fill: currentColor; }
+.dia svg .ah-a { fill: var(--accent); }
+.chart svg { min-width: 560px; }
+.chart .bar1 { fill: var(--s1); } .chart .bar2 { fill: var(--s2); }
+.chart rect.bar1:hover, .chart rect.bar2:hover { opacity: .8; }
+.chart .grid { stroke: var(--rule); stroke-width: 1; }
+.legend { display: flex; gap: 18px; flex-wrap: wrap; font-size: 14px; margin: 0 0 6px; }
+.legend i { display: inline-block; width: 12px; height: 12px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
+dl.terms { display: grid; grid-template-columns: minmax(130px, 200px) minmax(0, 1fr); gap: 6px 18px; margin: 12px 0; }
+dl.terms dt { font-weight: 600; font-family: var(--f-mono); font-size: 14px; padding-top: 2px; }
+dl.terms dd { margin: 0; max-width: 64ch; }
+@media (max-width: 560px) { dl.terms { grid-template-columns: minmax(0, 1fr); } dl.terms dd { margin-bottom: 8px; } h1 { font-size: 34px; } }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+html { scroll-behavior: smooth; }
+</style>
+
+<div class="wrap">
+<nav class="toc" aria-label="Contents">
+  <p>Contents</p>
+  <ol>
+    <li><a href="#purpose">Purpose and scope</a></li>
+    <li><a href="#terms">Terms</a></li>
+    <li><a href="#pipeline">GPU pipeline</a></li>
+    <li><a href="#tracker">Tracker step</a></li>
+    <li><a href="#states">Track states</a></li>
+    <li><a href="#occlusion">Occlusion handling</a></li>
+    <li><a href="#kalman">Kalman filter</a></li>
+    <li><a href="#solver">Assignment solver</a></li>
+    <li><a href="#procedures">Procedures</a></li>
+    <li><a href="#config">Configuration</a></li>
+    <li><a href="#results">Results</a></li>
+    <li><a href="#trouble">Troubleshooting</a></li>
+    <li><a href="#limits">Limitations</a></li>
+    <li><a href="#licences">Licences and credits</a></li>
+  </ol>
+</nav>
+
+<main>
+<header class="doc">
+  <p class="eyebrow">Technical manual</p>
+  <h1>yolo-kalman: GPU multi-object tracker</h1>
+  <p class="lede">The tracker finds objects in video and gives each object a track id. The id stays the same when the object goes fully behind an obstacle and comes back. All steps run on the GPU.</p>
+  <p class="meta">Code state of 2026-11-27, after the audit fixes. Test host: 2 × NVIDIA RTX PRO 6000 Blackwell (96 GB), CUDA 13.2 driver.</p>
+  <div class="facts" role="list">
+    <div class="fact" role="listitem"><b>13 / 13</b><span>full occlusions with the same id (synthetic clips, gaps up to 157 frames)</span></div>
+    <div class="fact" role="listitem"><b>0</b><span>ID switches on the synthetic clips</span></div>
+    <div class="fact" role="listitem"><b>5,664 fps</b><span>end to end, 32 streams, 2 GPUs (median of 3 runs)</span></div>
+    <div class="fact" role="listitem"><b>0.40 ms</b><span>one tracker step, 8 streams, tracker alone</span></div>
+    <div class="fact" role="listitem"><b>23 / 23</b><span>tests pass with <code>REQUIRE_E2E=1</code></span></div>
+  </div>
+</header>
+
+<!-- ======================================================================= -->
+<h2 id="purpose"><span class="num">1</span>Purpose and scope</h2>
+<p>This manual describes the yolo-kalman tracker. It tells you how the tracker works, how to install it, how to run it, and how to read the results.</p>
+<p>The tracker has two parts:</p>
+<ul>
+  <li><b>Detector.</b> Ultralytics YOLO26m finds objects in each frame. It runs as a TensorRT FP16 engine. The detector does not track.</li>
+  <li><b>Tracker.</b> The project's own PyTorch code connects detections from frame to frame. It does not use <code>model.track()</code> or boxmot.</li>
+</ul>
+<p>The tracker uses five methods together:</p>
+<ul>
+  <li>A <b>Kalman filter</b> predicts where each object moves.</li>
+  <li><b>BYTE</b> matching uses high-score detections first and low-score detections second.</li>
+  <li><b>OC-SORT</b> methods (OCM, OCR, ORU) correct the motion after a gap.</li>
+  <li><b>Appearance re-identification</b> (re-ID) compares how objects look. It finds an object again after a long occlusion.</li>
+  <li>A <b>batched GPU Hungarian solver</b> finds the best matches between tracks and detections for all streams in one GPU call.</li>
+</ul>
+<p>The tracker processes many video streams at the same time. Each stream has its own track ids.</p>
+<div class="note"><b>Note</b>Ids are unique in one stream only. Two streams can both have a track with id 7.</div>
+
+<!-- ======================================================================= -->
+<h2 id="terms"><span class="num">2</span>Terms</h2>
+<p>This manual uses each term below with one meaning only.</p>
+<dl class="terms">
+  <dt>stream</dt><dd>One video source. The pipeline processes S streams in parallel.</dd>
+  <dt>frame</dt><dd>One image of a stream.</dd>
+  <dt>chunk</dt><dd>8 consecutive frames of every stream. The detector processes one chunk in one batch.</dd>
+  <dt>detection</dt><dd>One box with a score, a class and an embedding, from one frame. Each stream has up to N = 160 detections per frame.</dd>
+  <dt>track</dt><dd>One object over time. A track has an id, a Kalman state and an embedding.</dd>
+  <dt>slot</dt><dd>One fixed place for a track in GPU memory. Each stream has M = 160 slots.</dd>
+  <dt>high / low detection</dt><dd>High: score ≥ 0.5. Low: 0.1 ≤ score &lt; 0.5.</dd>
+  <dt>gap</dt><dd>The number of frames since the last trusted observation of a track.</dd>
+  <dt>coast</dt><dd>A track coasts when it has no match. Its box then comes from the Kalman prediction only.</dd>
+  <dt>embedding</dt><dd>A 512-value vector that describes how a detection looks. ResNet-18 makes it.</dd>
+  <dt>cost</dt><dd>A number for one track–detection pair. A low cost means a good match.</dd>
+  <dt>gate</dt><dd>A limit. A pair above the gate cannot match.</dd>
+  <dt>CUDA graph</dt><dd>A recorded set of GPU kernels. The GPU replays it with one call and no Python work.</dd>
+  <dt>host sync</dt><dd>A point where the CPU waits for the GPU to finish.</dd>
+</dl>
+
+<!-- ======================================================================= -->
+<h2 id="pipeline"><span class="num">3</span>GPU pipeline</h2>
+<p>The pipeline has three threads. Each thread has its own CUDA stream. Images stay in GPU memory from decode to tracking.</p>
+<figure>
+<div class="dia">
+<svg viewBox="0 0 940 250" role="img" aria-label="Pipeline: a reader thread decodes and letterboxes, a detector thread runs TensorRT and embeddings, a tracker thread runs three CUDA graphs per frame; only results reach the host, once per chunk.">
+  <defs>
+    <marker id="pa" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="ah"/></marker>
+    <marker id="paa" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="ah-a"/></marker>
+  </defs>
+  <rect x="10" y="70" width="120" height="70" rx="4" class="box"/>
+  <text x="70" y="98" text-anchor="middle" class="t-hd">Video files</text>
+  <text x="70" y="118" text-anchor="middle" class="t-sm">S streams</text>
+
+  <rect x="190" y="40" width="200" height="130" rx="4" class="box"/>
+  <text x="290" y="64" text-anchor="middle" class="t-hd">Reader thread</text>
+  <text x="290" y="88" text-anchor="middle">NVDEC decode</text>
+  <text x="290" y="108" text-anchor="middle">GPU letterbox to 384×640</text>
+  <text x="290" y="128" text-anchor="middle">2 input buffers</text>
+  <text x="290" y="156" text-anchor="middle" class="t-sm">low-priority CUDA stream</text>
+
+  <rect x="450" y="40" width="200" height="130" rx="4" class="box"/>
+  <text x="550" y="64" text-anchor="middle" class="t-hd">Detector thread</text>
+  <text x="550" y="88" text-anchor="middle">TensorRT YOLO26m FP16</text>
+  <text x="550" y="108" text-anchor="middle">un-letterbox boxes</text>
+  <text x="550" y="128" text-anchor="middle">ResNet-18 embeddings</text>
+  <text x="550" y="156" text-anchor="middle" class="t-sm">low-priority CUDA stream</text>
+
+  <rect x="710" y="40" width="210" height="130" rx="4" class="box-a"/>
+  <text x="815" y="64" text-anchor="middle" class="t-hd">Tracker thread</text>
+  <text x="815" y="88" text-anchor="middle">8 steps per chunk</text>
+  <text x="815" y="108" text-anchor="middle">3 CUDA graphs per step</text>
+  <text x="815" y="128" text-anchor="middle">pinned output ring</text>
+  <text x="815" y="156" text-anchor="middle" class="t-sm">high-priority CUDA stream</text>
+
+  <line x1="130" y1="105" x2="186" y2="105" class="ln" marker-end="url(#pa)"/>
+  <line x1="390" y1="105" x2="446" y2="105" class="ln" marker-end="url(#pa)"/>
+  <line x1="650" y1="105" x2="706" y2="105" class="ln" marker-end="url(#pa)"/>
+  <text x="418" y="28" text-anchor="middle" class="t-sm">fp16 batch [S·8, 3, 384, 640]</text>
+  <line x1="418" y1="32" x2="418" y2="100" class="ln-d"/>
+  <text x="678" y="28" text-anchor="middle" class="t-sm">boxes, scores, classes, embeddings</text>
+  <line x1="678" y1="32" x2="678" y2="100" class="ln-d"/>
+  <text x="158" y="28" text-anchor="middle" class="t-sm">VP9 / MPEG-4</text>
+  <line x1="158" y1="32" x2="158" y2="100" class="ln-d"/>
+
+  <line x1="815" y1="170" x2="815" y2="214" class="ln-a" marker-end="url(#paa)"/>
+  <text x="815" y="234" text-anchor="middle" class="t-hd">ids + boxes to the host</text>
+  <text x="690" y="200" text-anchor="end" class="t-sm">1 host sync per chunk of 8 frames</text>
+  <path d="M550,170 C550,205 290,205 290,174" class="ln-d" marker-end="url(#pa)"/>
+  <text x="420" y="222" text-anchor="middle" class="t-sm">event: input buffer free again</text>
+</svg>
+</div>
+<figcaption><b>Figure 1. Pipeline threads and data.</b> The reader fills one input buffer while TensorRT reads the other. CUDA events order the three streams. The host receives only the results.</figcaption>
+</figure>
+
+<h3><span class="num">3.1</span>Stages</h3>
+<div class="tbl"><table>
+<thead><tr><th>Stage</th><th>What it does</th><th>Implementation</th></tr></thead>
+<tbody>
+<tr><td>Decode</td><td>Decodes frames to RGB in GPU memory.</td><td><code>decode.NvDecSource</code>: PyNvVideoCodec 2.2.4 <code>ThreadedDecoder</code>, DLPack to torch. OpenCV CPU decode is the fallback.</td></tr>
+<tr><td>Letterbox</td><td>Scales each frame to fit 384×640 and fills the border with grey (114/255).</td><td><code>preprocess.letterbox_into</code>, bilinear, fp16.</td></tr>
+<tr><td>Detect</td><td>Finds objects. The NMS-free head gives up to 150 boxes per frame with no host sync.</td><td><code>detector.TRTYolo</code>, engine <code>yolo26m_384x640_b64_e2e_fp16.engine</code>, dynamic batch up to 64.</td></tr>
+<tr><td>Un-letterbox</td><td>Maps boxes back to source pixels and clips them to the image.</td><td>Vectorised in <code>pipeline._detect_embed</code>. Constants are built once.</td></tr>
+<tr><td>Embed</td><td>Crops each detection with score ≥ 0.5 and makes a 512-value embedding.</td><td><code>reid.AppearanceEncoder</code>: RoI-align 128×64 crops, ResNet-18 (ImageNet), fp16, L2-normalised. One call for all streams.</td></tr>
+<tr><td>Track</td><td>Matches detections to tracks and updates the tracks.</td><td><code>tracker.MultiStreamTracker</code>: <code>submit()</code> per frame, <code>collect()</code> per chunk.</td></tr>
+</tbody></table></div>
+<p>The engine alone processes about 3,300 images per second on one GPU at batch 32–64. NVDEC decodes about 5,000 fps for one 480p stream and about 20,000 fps for 16 decoders.</p>
+
+<!-- ======================================================================= -->
+<h2 id="tracker"><span class="num">4</span>Tracker step</h2>
+<p>One tracker step processes one frame of every stream. A step is three CUDA graphs. The step has no host sync.</p>
+<figure>
+<div class="dia">
+<svg viewBox="0 0 940 300" role="img" aria-label="One tracker step: graph pre predicts and computes cost tensors, graph match runs stages S1 to S5 with the GPU Hungarian solver, births and id recovery, graph post updates the Kalman state and writes outputs.">
+  <defs>
+    <marker id="ta" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" class="ah"/></marker>
+  </defs>
+  <rect x="10" y="20" width="250" height="260" rx="4" class="box"/>
+  <text x="135" y="46" text-anchor="middle" class="t-hd">Graph pre</text>
+  <text x="30" y="76">Kalman predict, all live slots</text>
+  <text x="30" y="100">IoU(prediction, detection)</text>
+  <text x="30" y="124">Mahalanobis d²</text>
+  <text x="30" y="148">IoU(last observation, detection)</text>
+  <text x="30" y="172">OCM direction term</text>
+  <text x="30" y="196">appearance cosine distance</text>
+  <text x="30" y="220">track–track terms (id recovery)</text>
+  <text x="135" y="262" text-anchor="middle" class="t-sm">5 cost planes [S, M, N] in fp16</text>
+
+  <rect x="320" y="20" width="300" height="260" rx="4" class="box-a"/>
+  <text x="470" y="46" text-anchor="middle" class="t-hd">Graph match</text>
+  <rect x="340" y="62" width="260" height="24" rx="3" class="box"/><text x="470" y="79" text-anchor="middle">S1 confirmed × high</text>
+  <rect x="340" y="92" width="260" height="24" rx="3" class="box"/><text x="470" y="109" text-anchor="middle">S2 seen last frame × low</text>
+  <rect x="340" y="122" width="260" height="24" rx="3" class="box"/><text x="470" y="139" text-anchor="middle">S3 last observation × high</text>
+  <rect x="340" y="152" width="260" height="24" rx="3" class="box"/><text x="470" y="169" text-anchor="middle">S4 lost × high (appearance)</text>
+  <rect x="340" y="182" width="260" height="24" rx="3" class="box"/><text x="470" y="199" text-anchor="middle">S5 tentative × high</text>
+  <rect x="340" y="212" width="260" height="24" rx="3" class="box"/><text x="470" y="229" text-anchor="middle">births, id recovery</text>
+  <text x="470" y="262" text-anchor="middle" class="t-sm">6 lap_batch launches, each for all streams</text>
+
+  <rect x="680" y="20" width="250" height="260" rx="4" class="box"/>
+  <text x="805" y="46" text-anchor="middle" class="t-hd">Graph post</text>
+  <text x="700" y="76">Kalman update, matched slots</text>
+  <text x="700" y="100">ORU re-update after a gap</text>
+  <text x="700" y="124">initiate new tracks</text>
+  <text x="700" y="148">embedding EMA</text>
+  <text x="700" y="172">last observation, history</text>
+  <text x="700" y="196">output boxes, ids, classes</text>
+  <text x="805" y="262" text-anchor="middle" class="t-sm">copy to pinned ring slot k</text>
+
+  <line x1="260" y1="150" x2="316" y2="150" class="ln" marker-end="url(#ta)"/>
+  <line x1="620" y1="150" x2="676" y2="150" class="ln" marker-end="url(#ta)"/>
+  <text x="288" y="140" text-anchor="middle" class="t-sm">costs</text>
+  <text x="648" y="140" text-anchor="middle" class="t-sm">matches</text>
+  <line x1="470" y1="86" x2="470" y2="92" class="ln"/><line x1="470" y1="116" x2="470" y2="122" class="ln"/>
+  <line x1="470" y1="146" x2="470" y2="152" class="ln"/><line x1="470" y1="176" x2="470" y2="182" class="ln"/>
+  <line x1="470" y1="206" x2="470" y2="212" class="ln"/>
+</svg>
+</div>
+<figcaption><b>Figure 2. One tracker step.</b> Each stage matches only the tracks and detections that earlier stages left free. All state stays in fixed-shape GPU tensors, so the three graphs can be recorded once and replayed.</figcaption>
+</figure>
+
+<h3><span class="num">4.1</span>Matching cascade</h3>
+<p>The table gives the rows, columns, cost and limit of each stage. A pair with a cost above the limit stays unmatched.</p>
+<div class="tbl"><table>
+<thead><tr><th>Stage</th><th>Tracks (rows)</th><th>Detections (columns)</th><th>Cost</th><th>Gate</th><th class="n">Limit</th></tr></thead>
+<tbody>
+<tr><td>S1</td><td>TRACKED and LOST</td><td>high</td><td>min(1 − IoU, appearance distance) − 0.2 · OCM · score</td><td>d² ≤ 13.277, same class group</td><td class="n">0.8</td></tr>
+<tr><td>S2</td><td>TRACKED and LOST, seen last frame</td><td>low</td><td>1 − IoU</td><td>d² ≤ 13.277, same class group</td><td class="n">0.5</td></tr>
+<tr><td>S3</td><td>TRACKED and LOST, gap ≤ 30</td><td>high</td><td>1 − IoU(last observation, detection)</td><td>same class group</td><td class="n">0.7</td></tr>
+<tr><td>S4</td><td>LOST (gap &gt; 1), with embedding</td><td>high</td><td>appearance distance</td><td>d² ≤ 60, same class group</td><td class="n">0.25</td></tr>
+<tr><td>S5</td><td>TENTATIVE</td><td>high</td><td>1 − IoU</td><td>same class group</td><td class="n">0.7</td></tr>
+</tbody></table></div>
+<ul>
+  <li><b>Appearance in S1.</b> S1 uses the appearance distance only when it is below 0.25 and the IoU cost is below 0.5 (BoT-SORT fusion).</li>
+  <li><b>d²</b> is the Mahalanobis distance between the Kalman prediction and the detection. 13.277 is the χ² value for 4 degrees of freedom at 0.99.</li>
+  <li><b>Class groups.</b> Car, bus and truck are one group. Bicycle and motorcycle are one group. The detector often changes between the classes of one group.</li>
+  <li><b>Births.</b> Each high detection with score ≥ 0.6 that no stage used starts a new TENTATIVE track. The k-th free detection goes to the k-th free slot.</li>
+</ul>
+
+<!-- ======================================================================= -->
+<h2 id="states"><span class="num">5</span>Track states</h2>
+<p>Each slot has one of four states. The state decides which stages can match the track.</p>
+<figure>
+<div class="dia">
+<svg viewBox="0 0 940 300" role="img" aria-label="Track state machine: FREE to TENTATIVE on birth, TENTATIVE to TRACKED after 2 hits, TRACKED to LOST on a miss, LOST to TRACKED on a match with ORU, LOST to FREE after the lost buffer or by id recovery.">
+  <defs>
+    <marker id="sa" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" class="ah"/></marker>
+    <marker id="saa" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" class="ah-a"/></marker>
+  </defs>
+  <rect x="30" y="120" width="130" height="56" rx="28" class="box"/><text x="95" y="153" text-anchor="middle" class="t-hd">FREE</text>
+  <rect x="270" y="120" width="150" height="56" rx="28" class="box"/><text x="345" y="153" text-anchor="middle" class="t-hd">TENTATIVE</text>
+  <rect x="530" y="120" width="140" height="56" rx="28" class="box-a"/><text x="600" y="153" text-anchor="middle" class="t-hd">TRACKED</text>
+  <rect x="780" y="120" width="130" height="56" rx="28" class="box"/><text x="845" y="153" text-anchor="middle" class="t-hd">LOST</text>
+
+  <line x1="160" y1="140" x2="266" y2="140" class="ln" marker-end="url(#sa)"/>
+  <text x="213" y="130" text-anchor="middle" class="t-sm">birth (score ≥ 0.6)</text>
+  <line x1="266" y1="160" x2="164" y2="160" class="ln" marker-end="url(#sa)"/>
+  <text x="213" y="178" text-anchor="middle" class="t-sm">miss</text>
+  <line x1="420" y1="148" x2="526" y2="148" class="ln" marker-end="url(#sa)"/>
+  <text x="473" y="138" text-anchor="middle" class="t-sm">2 hits: id given</text>
+  <line x1="670" y1="138" x2="776" y2="138" class="ln" marker-end="url(#sa)"/>
+  <text x="723" y="128" text-anchor="middle" class="t-sm">miss</text>
+  <line x1="776" y1="162" x2="674" y2="162" class="ln-a" marker-end="url(#saa)"/>
+  <text x="723" y="182" text-anchor="middle" class="t-sm">match S1/S2/S3/S4</text>
+  <text x="723" y="197" text-anchor="middle" class="t-sm">+ ORU re-update</text>
+
+  <path d="M845,176 C845,270 95,270 95,180" class="ln" marker-end="url(#sa)"/>
+  <text x="470" y="262" text-anchor="middle" class="t-sm">gap &gt; lost buffer (8 s × fps)</text>
+  <text x="470" y="282" text-anchor="middle" class="t-sm">or id recovery: a young TRACKED track takes this id</text>
+  <path d="M95,120 C95,40 600,40 600,116" class="ln-d" marker-end="url(#sa)"/>
+  <text x="347" y="56" text-anchor="middle" class="t-sm">first frame of a stream: birth goes straight to TRACKED with an id</text>
+</svg>
+</div>
+<figcaption><b>Figure 3. Track states.</b> Only TRACKED tracks that matched in the current frame are output. A LOST track keeps its id and coasts on the Kalman prediction until the lost buffer ends.</figcaption>
+</figure>
+<p>A TENTATIVE track has no id. It gets the next id of its stream when it has 2 hits. This removes short false tracks from the output.</p>
+
+<!-- ======================================================================= -->
+<h2 id="occlusion"><span class="num">6</span>Occlusion handling</h2>
+<p>An occlusion has three phases. The object becomes partly hidden, then fully hidden, then visible again. The tracker uses one mechanism for each phase.</p>
+<figure>
+<div class="dia">
+<svg viewBox="0 0 940 270" role="img" aria-label="Occlusion timeline: visible with Kalman updates, partly hidden with low-quality observations, fully hidden with the track LOST and coasting, then reappearance matched by S1, S3, S4 or id recovery, followed by an ORU re-update along a virtual trajectory.">
+  <defs>
+    <marker id="oa" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" class="ah"/></marker>
+  </defs>
+  <line x1="20" y1="92" x2="920" y2="92" class="ln" marker-end="url(#oa)"/>
+  <text x="918" y="114" text-anchor="end" class="t-sm">time (frames)</text>
+  <rect x="20" y="64" width="200" height="22" class="fill-a" opacity=".25"/>
+  <rect x="220" y="64" width="140" height="22" class="fill-a" opacity=".12"/>
+  <rect x="360" y="64" width="300" height="22" class="fill-hide"/>
+  <rect x="660" y="64" width="260" height="22" class="fill-a" opacity=".25"/>
+  <text x="120" y="54" text-anchor="middle" class="t-hd">visible</text>
+  <text x="290" y="54" text-anchor="middle" class="t-hd">partly hidden</text>
+  <text x="510" y="54" text-anchor="middle" class="t-hd">fully hidden</text>
+  <text x="790" y="54" text-anchor="middle" class="t-hd">visible again</text>
+
+  <text x="120" y="140" text-anchor="middle">Kalman update</text>
+  <text x="120" y="158" text-anchor="middle" class="t-sm">size reference: slow EMA</text>
+  <text x="290" y="140" text-anchor="middle">low-quality match</text>
+  <text x="290" y="158" text-anchor="middle" class="t-sm">R × 10⁴, no size velocity</text>
+  <text x="290" y="174" text-anchor="middle" class="t-sm">not an OC-SORT observation</text>
+  <text x="510" y="140" text-anchor="middle">state LOST, coast</text>
+  <text x="510" y="158" text-anchor="middle" class="t-sm">Kalman predict only, size frozen</text>
+  <text x="510" y="174" text-anchor="middle" class="t-sm">kept up to 8 s</text>
+  <text x="790" y="140" text-anchor="middle">match: S1 → S3 → S4</text>
+  <text x="790" y="158" text-anchor="middle" class="t-sm">or new track + id recovery</text>
+  <text x="790" y="174" text-anchor="middle" class="t-sm">(3–45 frames after birth)</text>
+
+  <circle cx="220" cy="230" r="5" class="fill-a"/>
+  <path d="M220,230 Q440,170 660,230" class="ln-d"/>
+  <circle cx="660" cy="230" r="5" class="fill-a"/>
+  <line x1="220" y1="230" x2="660" y2="230" class="ln-a"/>
+  <text x="220" y="256" text-anchor="middle" class="t-sm">last trusted observation z₀</text>
+  <text x="660" y="256" text-anchor="middle" class="t-sm">new detection z₁</text>
+  <text x="440" y="196" text-anchor="middle" class="t-sm">coasted prediction (dashed)</text>
+  <text x="440" y="222" text-anchor="middle" class="t-sm">ORU: up to 8 virtual observations on the line z₀ → z₁</text>
+</svg>
+</div>
+<figcaption><b>Figure 4. Occlusion timeline.</b> The track keeps its id while it is LOST. When it matches again, ORU replaces the drifted coasted state with a state re-filtered along the straight line between the two real observations.</figcaption>
+</figure>
+
+<h3><span class="num">6.1</span>Partial occlusion</h3>
+<p>The box of an object becomes smaller when the object goes behind an obstacle. A small box gives a wrong size and a wrong velocity.</p>
+<ul>
+  <li>The tracker keeps a reference size for each track. The reference is a slow EMA (factor 0.9) of trusted box sizes.</li>
+  <li>A match is <b>low quality</b> when the detection score is below 0.5, or when width or height is below 0.9 × the reference size or the predicted size.</li>
+  <li>A low-quality match multiplies the measurement noise R by 10⁴. The size velocity is set to zero.</li>
+  <li>A low-quality match does not change the last observation, the OCM history or the gap counter.</li>
+</ul>
+
+<h3><span class="num">6.2</span>Full occlusion</h3>
+<ul>
+  <li>An unmatched TRACKED track becomes LOST. It keeps its id.</li>
+  <li>The Kalman filter predicts the box in each frame. The size velocity is frozen while the track is LOST.</li>
+  <li>The track stays LOST for <code>lost_buffer_s</code> seconds (default 8 s). The limit in frames is 8 × the stream fps.</li>
+</ul>
+
+<h3><span class="num">6.3</span>Reappearance</h3>
+<p>The cascade tries to match the LOST track in this order:</p>
+<ol>
+  <li><b>S1.</b> The detection is near the prediction (IoU), or it looks the same (appearance) and is near.</li>
+  <li><b>S3 (OCR).</b> The detection overlaps the last real observation. This works for gaps up to 30 frames when the object stopped behind the obstacle.</li>
+  <li><b>S4 (re-ID).</b> The detection looks the same (appearance distance ≤ 0.25) inside a loose gate (d² ≤ 60).</li>
+  <li><b>Id recovery.</b> Sometimes the object comes back only partly visible and no stage matches it. It then starts a new track. When the new track is 3 to 45 frames old, the tracker compares its embedding with the LOST tracks that were already lost at its birth. A match gives the new track the old id, and the old slot becomes FREE.</li>
+</ol>
+
+<h3><span class="num">6.4</span>Observation-centric re-update (ORU)</h3>
+<p>The coasted state drifts during a long gap. ORU corrects it when the track matches again.</p>
+<ol class="steps">
+  <li>Take the posterior saved at the last trusted observation z₀.</li>
+  <li>Make up to 8 virtual observations on the straight line from z₀ to the new detection z₁.</li>
+  <li>Run predict and update for each virtual observation. Longer gaps use exact multi-step predictions between them.</li>
+  <li>Use the result as the new track state.</li>
+</ol>
+<p>The fixed number of virtual steps keeps the GPU work constant, so ORU fits in the CUDA graph.</p>
+
+<h3><span class="num">6.5</span>Example: 123 hidden frames</h3>
+<figure class="img wide">
+  <img src="{{IMG:strip_g120}}" alt="Three frames of a synthetic clip. Left, frame 115: person 1 walks toward a grey bar. Middle, frame 200: person 1 is fully hidden behind the bar. Right, frame 300: person 1 is visible again on the other side with the same id 1." width="1320" height="200">
+  <figcaption><b>Figure 5. Same id after a full occlusion</b> (<code>synth_gap120</code>, frames 115, 200 and 300). Person 1 is fully hidden from frame 137 to frame 259 (123 frames). The box label is "1 person" before and after. Person 3 walks the other way. Synthetic clip made by <code>scripts/make_synthetic.py</code>.</figcaption>
+</figure>
+
+<!-- ======================================================================= -->
+<h2 id="kalman"><span class="num">7</span>Kalman filter</h2>
+<p>The filter is a batched constant-velocity model in <code>kalman.py</code>. It works on any leading batch shape, for example [S, M].</p>
+<div class="tbl"><table>
+<thead><tr><th>Item</th><th>Value</th></tr></thead>
+<tbody>
+<tr><td>State x</td><td><code>[cx, cy, w, h, vcx, vcy, vw, vh]</code></td></tr>
+<tr><td>Measurement z</td><td><code>[cx, cy, w, h]</code></td></tr>
+<tr><td>Process noise Q</td><td>Standard deviation proportional to box w and h: 1/20 for position, 1/160 for velocity (BoT-SORT xywh filter).</td></tr>
+<tr><td>Measurement noise R</td><td>(w/20)², (h/20)², multiplied by (1 − score) (NSA Kalman filter). Low-quality matches: × 10⁴.</td></tr>
+<tr><td>Initial covariance</td><td>2/20 · size for position, 10/160 · size for velocity.</td></tr>
+<tr><td>Multi-step predict</td><td><code>predict_dt</code>: exact F<sup>dt</sup> and Σ F<sup>j</sup> Q F<sup>jT</sup> in closed form. dt = 1 equals <code>predict</code>.</td></tr>
+<tr><td>Gating</td><td>Squared Mahalanobis distance d² of each detection to each track.</td></tr>
+</tbody></table></div>
+<p>The update uses a Cholesky solve of the 4×4 innovation covariance. When the tracker is compiled, the solve is written element by element (<code>UNROLLED_4X4</code>). The compiler then fuses it into a few kernels. Predict and update use element-wise products, not batched 8×8 matrix multiplies, for the same reason.</p>
+<p><code>tests/test_kalman.py</code> compares predict, update and d² with a NumPy reference.</p>
+
+<!-- ======================================================================= -->
+<h2 id="solver"><span class="num">8</span>Assignment solver</h2>
+<p>Each cascade stage must pick the best set of track–detection pairs. The solver is an exact Hungarian method (Kuhn–Munkres) in shortest-augmenting-path form. It runs as one CUDA kernel for all streams. The torch custom op is <code>yolo_kalman::lap_batch</code>.</p>
+
+<h3><span class="num">8.1</span>Problem</h3>
+<p>The solver gives the same optimum as <code>lap.lapjv(c, extend_cost=True, cost_limit=L)</code>. In that problem each row and each column may stay unmatched at cost L/2. The optimum is:</p>
+<pre><code>min  Σ over matched pairs (c_ij − L)   +   L · (R + C) / 2</code></pre>
+<ul>
+  <li>A pair with c &gt; L never helps, so the solver forbids it.</li>
+  <li>A pair with c = L ties with "unmatched". The solver matches it, as lapjv does.</li>
+</ul>
+<figure>
+<div class="dia">
+<svg viewBox="0 0 940 260" role="img" aria-label="Solved matrix: n compacted rows by m real columns with cost c minus L, forbidden where c is above L, plus n dummy columns with cost 0 that mean row unmatched.">
+  <rect x="140" y="40" width="360" height="160" class="box"/>
+  <rect x="500" y="40" width="200" height="160" class="box-a"/>
+  <g class="ln-d">
+    <line x1="140" y1="80" x2="700" y2="80"/><line x1="140" y1="120" x2="700" y2="120"/><line x1="140" y1="160" x2="700" y2="160"/>
+    <line x1="230" y1="40" x2="230" y2="200"/><line x1="320" y1="40" x2="320" y2="200"/><line x1="410" y1="40" x2="410" y2="200"/>
+    <line x1="550" y1="40" x2="550" y2="200"/><line x1="600" y1="40" x2="600" y2="200"/><line x1="650" y1="40" x2="650" y2="200"/>
+  </g>
+  <rect x="231" y="81" width="88" height="38" class="fill-hide"/>
+  <rect x="411" y="41" width="88" height="38" class="fill-hide"/>
+  <rect x="141" y="161" width="88" height="38" class="fill-hide"/>
+  <text x="275" y="104" text-anchor="middle" class="t-sm">c &gt; L: forbidden</text>
+  <text x="320" y="28" text-anchor="middle" class="t-hd">m real columns (free detections): cost c − L</text>
+  <text x="600" y="28" text-anchor="middle" class="t-hd">n dummy columns: cost 0</text>
+  <text x="125" y="125" text-anchor="end" class="t-hd">n rows</text>
+  <text x="125" y="143" text-anchor="end" class="t-sm">(free tracks)</text>
+  <text x="600" y="226" text-anchor="middle" class="t-sm">a row matched to a dummy = track stays unmatched</text>
+  <text x="320" y="226" text-anchor="middle" class="t-sm">rows and columns with no allowed pair are removed first</text>
+  <text x="760" y="104" class="t-sm">stage masks:</text>
+  <text x="760" y="122" class="t-sm">row_mask [S, M]</text>
+  <text x="760" y="140" class="t-sm">col_mask [S, N]</text>
+</svg>
+</div>
+<figcaption><b>Figure 6. The matrix the kernel solves for one stream.</b> Grey cells are forbidden pairs. The dummy columns let any track stay unmatched at zero extra cost, which is how the cost limit works.</figcaption>
+</figure>
+
+<h3><span class="num">8.2</span>Kernel</h3>
+<ul>
+  <li>One thread block per stream. One launch solves all streams.</li>
+  <li>256 threads find the rows and columns that have at least one allowed pair. They compact them in order.</li>
+  <li>The threads copy the compacted costs to shared memory when they fit the device limit. Larger problems read global memory through the column index.</li>
+  <li>One warp runs the search. Columns are spread over the 32 lanes. A warp-shuffle reduction finds the minimum. Ties go to the lowest column index, so the result is deterministic.</li>
+  <li>Duals are float64. Costs are float32. There is no epsilon and no iteration limit, so the result is optimal.</li>
+  <li>All data-dependent loops are inside the kernel. A solve is one fixed launch with no host sync. CUDA graphs can record it.</li>
+</ul>
+<div class="note"><b>Note</b>The RTX PRO 6000 allows 99 KB of shared memory per block. This holds about 22,600 staged cells (150 × 150). The 160 × 160 maximum uses the global-memory path. <code>test_crowd_size_dense</code> derives a size that forces the global path on any GPU.</div>
+<p>The kernel is built on first use with <code>torch.utils.cpp_extension</code> (about 40 s, nvcc from <code>/usr/local/cuda</code>). The build is cached in <code>~/.cache/torch_extensions</code>.</p>
+
+<h3><span class="num">8.3</span>Solver speed</h3>
+<p>Sparse tracking-like costs: one true pair, three possible wrong pairs per row, all other pairs gated. Times include launch overhead, outside CUDA graphs. Inside the tracker graph one solve takes about 7.5 µs.</p>
+<div class="tbl"><table>
+<thead><tr><th>streams × rows × columns</th><th class="n">GPU Hungarian (one launch)</th><th class="n">lapjv (per stream, CPU)</th></tr></thead>
+<tbody>
+<tr><td>8 × 20 × 20</td><td class="n">0.038 ms</td><td class="n">0.148 ms</td></tr>
+<tr><td>16 × 30 × 30</td><td class="n">0.054 ms</td><td class="n">0.381 ms</td></tr>
+<tr><td>16 × 60 × 60</td><td class="n">0.155 ms</td><td class="n">0.918 ms</td></tr>
+<tr><td>32 × 40 × 40</td><td class="n">0.084 ms</td><td class="n">1.048 ms</td></tr>
+<tr><td>32 × 150 × 150</td><td class="n">0.879 ms</td><td class="n">9.780 ms</td></tr>
+</tbody></table></div>
+
+<h3><span class="num">8.4</span>Proof of exactness</h3>
+<ul>
+  <li><b>Unit tests</b> (<code>tests/test_assign.py</code>): the total cost equals scipy <code>linear_sum_assignment</code> and lapjv. Cases: random rectangular problems, 1×N, N×1, empty, all gated, costs at the limit, 3e38 and 6.55e4 values, NaN and inf, many ties, 32 mixed-size streams, problems up to the global-memory path, CUDA-graph replay and <code>torch.compile</code>.</li>
+  <li><b>Tracker</b>: the GPU cascade gives frame-identical output to the lapjv cascade on the synthetic scenes (<code>test_gpu_hungarian_cascade_matches_lapjv</code>).</li>
+  <li><b>Real data</b>: 8,536 of 8,536 recorded problems from 12 real clips give the same total cost as lapjv. 222 of them (2.6 %) have a different optimal assignment with the same cost.</li>
+</ul>
+<h3><span class="num">8.5</span>Use the solver</h3>
+<p>Call <code>lap_batch(cost, row_mask, col_mask, limit)</code>. All tensors must be on the GPU.</p>
+<div class="tbl"><table>
+<thead><tr><th>Argument</th><th>Shape and type</th><th>Meaning</th></tr></thead>
+<tbody>
+<tr><td><code>cost</code></td><td>[S, R, C] float32</td><td>Cost of each row–column pair, for each stream. A low cost is a good match.</td></tr>
+<tr><td><code>row_mask</code></td><td>[S, R] bool</td><td>The rows (tracks) that take part.</td></tr>
+<tr><td><code>col_mask</code></td><td>[S, C] bool</td><td>The columns (detections) that take part.</td></tr>
+<tr><td><code>limit</code></td><td>float</td><td>The cost limit for all streams. A pair above the limit cannot match.</td></tr>
+<tr><td>return value</td><td>[S, R] int64</td><td>The matched column of each row. <code>-1</code> means unmatched: the row is masked, or all its allowed pairs are above the limit.</td></tr>
+</tbody></table></div>
+<p>The result has the same optimum as one <code>lap.lapjv(cost[s][rows][:, cols], extend_cost=True, cost_limit=limit)</code> call per stream.</p>
+<pre><code>import torch
+from yolo_kalman.assign import lap_batch
+
+# 2 streams, 3 tracks (rows) x 4 detections (columns); cost = 1 - IoU
+cost = torch.tensor([[[0.10, 0.90, 0.95, 0.70],
+                      [0.85, 0.20, 0.90, 0.95],
+                      [0.90, 0.90, 0.90, 0.90]],
+                     [[0.30, 0.25, 9e4, 9e4],
+                      [0.20, 0.40, 9e4, 9e4],
+                      [9e4, 9e4, 9e4, 9e4]]], device="cuda")
+rows = torch.tensor([[True, True, True], [True, True, False]], device="cuda")
+cols = torch.ones(2, 4, dtype=torch.bool, device="cuda")
+print(lap_batch(cost, rows, cols, 0.8).tolist())   # [[0, 1, -1], [1, 0, -1]]</code></pre>
+<ul>
+  <li>Stream 0: row 2 stays unmatched. All its costs are above 0.8.</li>
+  <li>Stream 1: row 0 gets column 1 and row 1 gets column 0. The total is 0.25 + 0.20 = 0.45. The other choice costs 0.30 + 0.40 = 0.70.</li>
+  <li>Stream 1: row 2 is masked, so its result is <code>-1</code>.</li>
+</ul>
+
+<h3><span class="num">8.6</span>How the tracker uses the solver</h3>
+<p>The tracker calls the solver 6 times in each step, in <code>MultiStreamTracker._gmatch_core</code>. Each call solves all streams.</p>
+<ol class="steps">
+  <li>Make the cost plane of the stage for all streams.</li>
+  <li>Set each gated pair to <code>BIG</code> (6 × 10⁴). This value is above every limit, so the pair cannot match. A pair is gated when it fails the Mahalanobis gate, is in a different class group, or has no embedding.</li>
+  <li>Set <code>row_mask</code> to the tracks of the stage that are not matched yet.</li>
+  <li>Set <code>col_mask</code> to the detections of the stage that are not used yet.</li>
+  <li>Call <code>lap_batch</code> with the stage limit (S1 0.8, S2 0.5, S3 0.7, S4 0.25, S5 0.7).</li>
+  <li>Mark the matched rows and the used columns. The next stage starts from these masks.</li>
+</ol>
+<p>Call 6 is id recovery. Its rows are LOST tracks. Its columns are young TRACKED tracks. Its cost is the embedding distance. Its limit is 0.25.</p>
+<p>All 6 calls are inside the <i>match</i> CUDA graph, so the CPU does no work for them during replay.</p>
+<p>To use the CPU reference cascade with <code>lap.lapjv</code>, set <code>TrackerConfig(assign="lapjv")</code>. The scripts <code>track.py</code>, <code>bench.py</code> and <code>eval_synth.py</code> accept <code>--assign lapjv</code>.</p>
+
+<!-- ======================================================================= -->
+<h2 id="procedures"><span class="num">9</span>Procedures</h2>
+<div class="caution"><b>Caution</b>Run all project Python through <code>./run.sh</code>. It removes <code>LD_LIBRARY_PATH</code>. The host path loads cuDNN 9.20 before the venv cuDNN 9.24, and every convolution then fails.</div>
+
+<h3><span class="num">9.1</span>Install the environment</h3>
+<ol class="steps">
+  <li>Go to the project folder.<pre><code>cd ~/GWorkspace/yolo-kalman</code></pre></li>
+  <li>Sync the environment. This installs torch 2.14 (cu130), TensorRT 11.5, PyNvVideoCodec and the dev group (pytest, motmetrics).<pre><code>~/.local/bin/uv sync</code></pre></li>
+  <li>Make sure that nvcc is at <code>/usr/local/cuda/bin/nvcc</code>. The solver kernel needs it for the first build.</li>
+</ol>
+
+<h3><span class="num">9.2</span>Get the clips</h3>
+<ol class="steps">
+  <li>Download the Wikimedia Commons 480p transcodes to <code>clips/</code>.<pre><code>./run.sh scripts/download_clips.py</code></pre></li>
+  <li>Read <code>meta/clips_index.tsv</code> for the licence and source page of each clip.</li>
+</ol>
+<div class="caution"><b>Caution</b>Downloaded clips are untrusted data. <code>run.sh</code> starts Python with <code>-I</code>, so files in the clip folder cannot replace Python modules.</div>
+
+<h3><span class="num">9.3</span>Export the detector engine</h3>
+<ol class="steps">
+  <li>Go to the models folder.<pre><code>cd models</code></pre></li>
+  <li>Export the TensorRT FP16 engine with the NMS-free head.<pre><code>../run.sh ../scripts/export_trt.py yolo26m.pt --nms-free</code></pre></li>
+  <li>Go back to the project folder.<pre><code>cd ..</code></pre></li>
+</ol>
+
+<h3><span class="num">9.4</span>Make the synthetic clips</h3>
+<ol class="steps">
+  <li>Make the occlusion clips and their ground truth in <code>data/synth/</code>.<pre><code>./run.sh scripts/make_synthetic.py</code></pre></li>
+</ol>
+
+<h3><span class="num">9.5</span>Run the tests</h3>
+<ol class="steps">
+  <li>Run all tests in strict mode.<pre><code>REQUIRE_E2E=1 ./run.sh -m pytest -rs -q</code></pre></li>
+  <li>Make sure that the result is <code>23 passed</code> with no skip.</li>
+</ol>
+<div class="note"><b>Note</b>The two end-to-end tests need the engine, a real clip and a synthetic clip. These files are not in git. Without <code>REQUIRE_E2E=1</code> the tests skip and pytest still reports success. A skip means that the occlusion result is not verified.</div>
+<p>To run one test, use <code>-k</code>:</p>
+<pre><code>./run.sh -m pytest -q -k test_crowd_size_dense</code></pre>
+
+<h3><span class="num">9.6</span>Evaluate on the synthetic clips</h3>
+<ol class="steps">
+  <li>Run the evaluation and the ablations. Add <code>--overlay</code> to write videos.<pre><code>./run.sh scripts/eval_synth.py --overlay</code></pre></li>
+  <li>Read <code>results/synth/metrics.md</code>.</li>
+</ol>
+
+<h3><span class="num">9.7</span>Track real clips</h3>
+<ol class="steps">
+  <li>Track all clips as parallel streams on one GPU and write overlay videos.<pre><code>./run.sh scripts/track.py clips/*.webm --out results/real --overlay</code></pre></li>
+  <li>Open <code>results/real/*_tracks.mp4</code> to see ids and trails.</li>
+  <li>Read <code>results/real/summary.json</code> for id counts, fragmentations and timings.</li>
+</ol>
+<p>Useful options: <code>--no-reid</code>, <code>--lost-s 8.0</code>, <code>--assign lapjv</code>, <code>--classes 0 2 5</code>, <code>--max-frames N</code>, <code>--gpu 1</code>.</p>
+
+<h3><span class="num">9.8</span>Measure throughput</h3>
+<ol class="steps">
+  <li>Run the benchmark on both GPUs. Each setting runs 3 times. The median run is reported.<pre><code>./run.sh scripts/bench.py --streams 1 4 8 16 32 --gpus 0 1 --frames 1200 --repeats 3 --assign gpu_hungarian --tag mytag</code></pre></li>
+  <li>Make a markdown table from the result.<pre><code>./run.sh scripts/bench_table.py "mytag"</code></pre></li>
+</ol>
+<p>The clips limit a stream to about 1,350 frames. To get less noise, use more repeats, not more frames.</p>
+
+<h3><span class="num">9.9</span>Use the tracker from Python</h3>
+<pre><code>from yolo_kalman.pipeline import Pipeline, PipelineConfig
+from yolo_kalman.tracker import TrackerConfig
+
+cfg = PipelineConfig(classes=[0, 2], tracker=TrackerConfig(lost_buffer_s=8.0))
+pipe = Pipeline(["clips/a.webm", "clips/b.webm"], gpu=0, cfg=cfg)
+for r in pipe.run():                      # one StreamResult per stream
+    for ids, boxes, scores, cls in r.tracks:   # one entry per frame
+        ...</code></pre>
+<p>Create the <code>Pipeline</code> before you open other NVDEC decoders. The tracker records its CUDA graphs in the constructor. Decoder threads on the legacy stream can break a recording.</p>
+
+<!-- ======================================================================= -->
+<h2 id="config"><span class="num">10</span>Configuration</h2>
+<h3><span class="num">10.1</span><code>TrackerConfig</code> (tracker.py)</h3>
+<div class="tbl"><table>
+<thead><tr><th>Field</th><th class="n">Default</th><th>Effect</th></tr></thead>
+<tbody>
+<tr><td><code>high_thresh</code> / <code>low_thresh</code></td><td class="n">0.5 / 0.1</td><td>Score limits for high and low detections (BYTE).</td></tr>
+<tr><td><code>new_track_thresh</code></td><td class="n">0.6</td><td>Minimum score to start a track.</td></tr>
+<tr><td><code>match_thresh</code></td><td class="n">0.8</td><td>S1 cost limit.</td></tr>
+<tr><td><code>low_match_thresh</code></td><td class="n">0.5</td><td>S2 cost limit.</td></tr>
+<tr><td><code>ocr_thresh</code> / <code>ocr_max_gap</code></td><td class="n">0.7 / 30</td><td>S3 cost limit and maximum gap in frames.</td></tr>
+<tr><td><code>unconfirmed_thresh</code></td><td class="n">0.7</td><td>S5 cost limit.</td></tr>
+<tr><td><code>gate_chi2</code> / <code>reid_gate_chi2</code></td><td class="n">13.277 / 60</td><td>Mahalanobis gates for S1–S2 and for S4 and id recovery.</td></tr>
+<tr><td><code>lost_buffer_s</code></td><td class="n">8.0</td><td>Seconds a LOST track coasts before its slot becomes FREE.</td></tr>
+<tr><td><code>n_init</code></td><td class="n">2</td><td>Hits to confirm a TENTATIVE track.</td></tr>
+<tr><td><code>use_appearance</code></td><td class="n">True</td><td>Use embeddings in S1, S4 and id recovery.</td></tr>
+<tr><td><code>emb_alpha</code></td><td class="n">0.9</td><td>Embedding EMA factor. Lower-score detections change the embedding less.</td></tr>
+<tr><td><code>emb_thresh</code> / <code>proximity_thresh</code></td><td class="n">0.25 / 0.5</td><td>S1 uses appearance only below both limits.</td></tr>
+<tr><td><code>reid_thresh</code></td><td class="n">0.25</td><td>S4 and id-recovery appearance limit.</td></tr>
+<tr><td><code>emb_update_max_overlap</code></td><td class="n">0.4</td><td>No embedding update when the detection overlaps another detection more than this.</td></tr>
+<tr><td><code>id_recovery</code>, <code>young_min_frames</code>, <code>young_max_frames</code></td><td class="n">True, 3, 45</td><td>Age window of a new track for id recovery.</td></tr>
+<tr><td><code>ocm_weight</code> / <code>ocm_delta</code></td><td class="n">0.2 / 3</td><td>OCM direction term weight and history length.</td></tr>
+<tr><td><code>use_oru</code> / <code>oru_max_steps</code></td><td class="n">True / 8</td><td>ORU on or off, and its number of virtual observations.</td></tr>
+<tr><td><code>freeze_size_when_lost</code></td><td class="n">True</td><td>Set the size velocity to zero while LOST.</td></tr>
+<tr><td><code>shape_change_ratio</code>, <code>size_ema</code></td><td class="n">0.9, 0.9</td><td>Low-quality test and reference-size EMA.</td></tr>
+<tr><td><code>class_aware</code>, <code>class_groups</code></td><td class="n">True</td><td>Match only inside a class group.</td></tr>
+<tr><td><code>max_tracks</code> / <code>max_dets</code></td><td class="n">160 / 160</td><td>Slots M and detections N per stream.</td></tr>
+<tr><td><code>cuda_graph</code> / <code>compile</code></td><td class="n">True / True</td><td>Record CUDA graphs and compile with inductor. Set <code>compile=False</code> to skip the ~30 s compile in tests.</td></tr>
+<tr><td><code>assign</code></td><td class="n">"gpu_hungarian"</td><td><code>"lapjv"</code> runs the CPU reference cascade.</td></tr>
+<tr><td><code>max_pending</code></td><td class="n">64</td><td>Maximum submitted steps before <code>collect()</code>.</td></tr>
+</tbody></table></div>
+
+<h3><span class="num">10.2</span><code>PipelineConfig</code> (pipeline.py)</h3>
+<div class="tbl"><table>
+<thead><tr><th>Field</th><th class="n">Default</th><th>Effect</th></tr></thead>
+<tbody>
+<tr><td><code>engine</code></td><td class="n">models/yolo26m_384x640_b64_e2e_fp16.engine</td><td>Detector engine. A <code>.pt</code> file uses the torch FP16 fallback.</td></tr>
+<tr><td><code>chunk</code></td><td class="n">8</td><td>Frames per stream per detector batch.</td></tr>
+<tr><td><code>conf</code> / <code>nms_iou</code> / <code>max_det</code></td><td class="n">0.1 / 0.6 / 150</td><td>Detector limits. BYTE needs low-score boxes, so keep <code>conf</code> low.</td></tr>
+<tr><td><code>classes</code></td><td class="n">None</td><td>COCO class ids to keep. The scripts use person, bicycle, car, motorcycle, bus, truck, bird, cat and dog.</td></tr>
+<tr><td><code>use_reid</code> / <code>reid_min_score</code></td><td class="n">True / 0.5</td><td>Make embeddings, and the minimum score to embed a detection.</td></tr>
+<tr><td><code>decoder</code></td><td class="n">"nvdec"</td><td>NVDEC first, OpenCV if NVDEC fails.</td></tr>
+<tr><td><code>overlap</code></td><td class="n">True</td><td>Run the three threads in parallel.</td></tr>
+<tr><td><code>max_frames</code></td><td class="n">None</td><td>Frame limit per stream.</td></tr>
+<tr><td><code>profile</code></td><td class="n">False</td><td>Sync between stages to get an exact time split. This makes the pipeline slower.</td></tr>
+</tbody></table></div>
+
+<!-- ======================================================================= -->
+<h2 id="results"><span class="num">11</span>Results</h2>
+
+<h3><span class="num">11.1</span>Synthetic clips with ground truth</h3>
+<p>People walk behind a grey bar that hides them fully for a known number of frames. A third person walks the other way and is hidden longer. One more clip has a head-on crossing and an X crossing. Ground truth counts objects with visibility ≥ 0.3. The real detector and the full pipeline run on these clips.</p>
+<p>"Same id" checks one thing: is the id 1 s after the object comes back the same as the id before it was hidden?</p>
+<div class="tbl"><table>
+<thead><tr><th>Variant</th><th class="n">gap 10</th><th class="n">gap 30</th><th class="n">gap 60</th><th class="n">gap 120</th><th class="n">crossing</th><th class="n">ID switches (all clips)</th><th class="n">HOTA range</th></tr></thead>
+<tbody>
+<tr class="em"><td>full (BYTE + OC-SORT + re-ID)</td><td class="n">3/3</td><td class="n">3/3</td><td class="n">3/3</td><td class="n">3/3</td><td class="n">1/1</td><td class="n">0</td><td class="n">0.854–0.883</td></tr>
+<tr><td>no re-ID</td><td class="n">3/3</td><td class="n">2/3</td><td class="n">0/3</td><td class="n">0/3</td><td class="n">1/1</td><td class="n">10</td><td class="n">0.637–0.873</td></tr>
+<tr><td>no ORU / OCM / OCR</td><td class="n">3/3</td><td class="n">3/3</td><td class="n">3/3</td><td class="n">3/3</td><td class="n">1/1</td><td class="n">4</td><td class="n">0.832–0.919</td></tr>
+<tr><td>ByteTrack-like (1 s buffer, no OC-SORT, no re-ID)</td><td class="n">2/3</td><td class="n">0/3</td><td class="n">0/3</td><td class="n">0/3</td><td class="n">1/1</td><td class="n">20</td><td class="n">0.637–0.925</td></tr>
+</tbody></table></div>
+<ul>
+  <li>The full tracker keeps all 13 occlusions with the same id. The longest gap is 157 frames.</li>
+  <li>Without re-ID, motion alone keeps the id for about 10–30 hidden frames. The box shrinks before the object vanishes, so a constant-velocity model puts the object in the wrong place after a long gap.</li>
+  <li>The ByteTrack-like baseline loses the id from 30 frames on.</li>
+  <li>The GPU Hungarian and the lapjv runs give identical tables.</li>
+</ul>
+<p>Full per-clip table: <code>results/synth/metrics.md</code> (HOTA, AssA, DetA, IDF1, MOTA, IDSW, fragmentations, GT ids, predicted ids). HOTA is a re-implementation of the TrackEval algorithm. IDF1, MOTA and IDSW come from motmetrics.</p>
+
+<h3><span class="num">11.2</span>Real clips (no ground truth)</h3>
+<p>12 open-licence Wikimedia Commons clips (24,837 frames) ran as 12 parallel streams on one GPU.</p>
+<div class="pair">
+  <figure class="img"><img src="{{IMG:traffic}}" alt="Street scene with a cyclist in the foreground. The cyclist has the box 36 person and the bicycle has its own box. Cars and pedestrians in the background have small boxes with ids." width="640" height="360"><figcaption><b>Figure 7.</b> Traffic on Slovenska street, frame 700. The line behind the cyclist is the track trail.</figcaption></figure>
+  <figure class="img"><img src="{{IMG:doves}}" alt="Two doves near a water bowl. The near dove has the box 13 bird." width="640" height="360"><figcaption><b>Figure 8.</b> Starling bathing, two doves walking, frame 6000. The doves often hide each other. The longest bridged gap in this clip is 434 frames.</figcaption></figure>
+</div>
+<figure class="img"><img src="{{IMG:station}}" alt="Square in front of a train station with a tram and several pedestrians far away, each with a small box and id." width="640" height="360"><figcaption><b>Figure 9.</b> Soundscapes of Norrköping (4), train station, frame 1200. Small, far objects with trams that pass in front of them.</figcaption></figure>
+<div class="tbl"><table>
+<thead><tr><th>Measure</th><th class="n">full</th><th class="n">no re-ID</th></tr></thead>
+<tbody>
+<tr><td>Unique ids, all 12 clips</td><td class="n">603</td><td class="n">833</td></tr>
+<tr><td>Objects seen again under their old id after a gap ≥ 1 s</td><td class="n">510</td><td class="n">237</td></tr>
+<tr><td>ORU re-updates / S4 re-IDs / OCR matches / id recoveries</td><td class="n">3,291 / 1,217 / 729 / 175</td><td class="n">–</td></tr>
+<tr><td>Dropped detections / slot overflows</td><td class="n">0 / 0</td><td class="n">–</td></tr>
+</tbody></table></div>
+<div class="caution"><b>Caution</b>These clips have no ground truth. Fewer ids can also come from wrong merges. The real-clip numbers show the behaviour, not the accuracy.</div>
+<p>Two full runs with the same solver give 601 and 619 ids. The pipeline is not bit-identical from run to run, because the detector and embedding numerics change slightly. Solver comparisons on real data therefore use recorded inputs.</p>
+
+<h3><span class="num">11.3</span>Throughput</h3>
+<p>End to end: NVDEC, TensorRT, re-ID and tracker, with no overlay. The 5 longest clips repeat in turn, 1,200 frames per stream. Streams are split over GPU 0 and GPU 1, one worker process per GPU. Each value is the median of 3 runs. The spread between runs is up to 6 %.</p>
+<figure class="chart">
+<div class="legend"><span><i style="background:var(--s1)"></i>GPU Hungarian (default)</span><span><i style="background:var(--s2)"></i>lapjv (CPU cascade)</span></div>
+<div class="dia">{{CHART}}</div>
+<figcaption><b>Figure 10. Frames per second, all streams together.</b> The GPU Hungarian cascade is 1.42× to 1.65× faster. Hover a bar to see its value. The table below has all values.</figcaption>
+</figure>
+<div class="tbl"><table>
+<thead><tr><th class="n">streams</th><th class="n">GPU Hungarian fps</th><th class="n">lapjv fps</th><th class="n">speed-up</th><th class="n">GPU utilisation (Hungarian)</th><th class="n">tracker pre / match / post s (Hungarian, GPU time)</th></tr></thead>
+<tbody>{{TPUT_ROWS}}</tbody></table></div>
+<ul>
+  <li>The tracker alone (8 streams, synthetic detections, compiled with CUDA graphs) takes <b>0.40 ms per step</b> with the GPU cascade and 2.09 ms with lapjv. GPU split: 0.07 ms pre, 0.11 ms match (6 solver launches, about 45 µs), 0.12 ms post.</li>
+  <li>TensorRT alone reaches about 6,600 fps on 2 GPUs. The full pipeline reaches 80 % (16 streams) to 86 % (32 streams) of that.</li>
+  <li>The tracker kernels compete with TensorRT for the GPU. One step takes 0.4 ms alone and about 2.4 ms under full load.</li>
+</ul>
+
+<h3><span class="num">11.4</span>Optimisation history</h3>
+<div class="tbl"><table>
+<thead><tr><th>Step</th><th>Change</th><th>Result</th></tr></thead>
+<tbody>
+<tr><td>1</td><td>Eager tracker with a per-track ORU loop.</td><td>158 fps (1 stream), 533 fps (8 streams), 1 GPU. About 1,000 small kernel launches per step.</td></tr>
+<tr><td>2</td><td>Fixed-shape slot tensors, 2 CUDA graphs per step.</td><td>1,313 fps (16 streams), 1 GPU.</td></tr>
+<tr><td>3</td><td>Batched embeddings, NMS-free YOLO26 head.</td><td>1,554 fps (16 streams), 1 GPU.</td></tr>
+<tr><td>4</td><td><code>torch.compile</code>, unrolled 4×4 Cholesky, high-priority tracker stream.</td><td>3,015 fps (16) / 3,519 fps (32), 2 GPUs. The CPU lapjv cascade became the limit.</td></tr>
+<tr><td>5</td><td>GPU Hungarian, cascade on the GPU, 1 sync per chunk.</td><td>4,655 fps (16 streams).</td></tr>
+<tr><td>6</td><td>Fusable element-wise Kalman code, faster solver kernel.</td><td>Tracker step 0.66 → 0.40 ms. 5,245 fps (32 streams).</td></tr>
+<tr><td>7</td><td>Producer split into reader and detector threads.</td><td>5,272 fps (16) / 5,664 fps (32), GPU utilisation 85–91 %.</td></tr>
+</tbody></table></div>
+
+<!-- ======================================================================= -->
+<h2 id="trouble"><span class="num">12</span>Troubleshooting</h2>
+<div class="tbl"><table>
+<thead><tr><th>Symptom</th><th>Cause</th><th>Action</th></tr></thead>
+<tbody>
+<tr><td><code>CUDNN_STATUS_SUBLIBRARY_LOADING_FAILED</code> on a convolution</td><td>The host <code>LD_LIBRARY_PATH</code> loads an older cuDNN.</td><td>Start Python with <code>./run.sh</code>.</td></tr>
+<tr><td>pytest passes, but shows 2 skipped</td><td>Engine, real clip or synthetic clip is missing.</td><td>Do procedures 9.2 to 9.4. Run again with <code>REQUIRE_E2E=1</code>.</td></tr>
+<tr><td>First solver call takes about 40 s</td><td>The CUDA kernel builds on first use.</td><td>Wait. The next calls use the cache in <code>~/.cache/torch_extensions</code>.</td></tr>
+<tr><td>Kernel build fails, nvcc or ninja not found</td><td>No CUDA toolkit at <code>/usr/local/cuda</code>, or the venv is not on the path.</td><td>Install the CUDA toolkit. Set <code>CUDA_HOME</code>. Use <code>./run.sh</code>, which uses the venv ninja.</td></tr>
+<tr><td><code>lap_batch: RxC needs N B shared memory, device allows M B</code></td><td><code>max_tracks</code> or <code>max_dets</code> is too large for this GPU.</td><td>Lower <code>max_tracks</code> or <code>max_dets</code>.</td></tr>
+<tr><td><code>lap_batch needs CUDA tensors</code></td><td>The solver received CPU tensors.</td><td>Move the tensors to the GPU, or use <code>assign="lapjv"</code>.</td></tr>
+<tr><td><code>[decode] NVDEC failed ... using OpenCV</code></td><td>NVDEC cannot open the file.</td><td>Make sure the codec is VP9, H.264, HEVC or MPEG-4. The OpenCV fallback works but is slower.</td></tr>
+<tr><td><code>[detector] TensorRT load failed</code></td><td>The engine was built for another TensorRT version or GPU.</td><td>Export the engine again on this host (procedure 9.3).</td></tr>
+<tr><td>Benchmark reports <code>worker process died</code> or <code>results are missing</code></td><td>A worker failed fast. The old hang is now a fast failure.</td><td>Run the setting again. Read the worker traceback in the output.</td></tr>
+<tr><td>CUDA graph capture error at start</td><td>Another decoder thread used the legacy stream during capture.</td><td>Create the <code>Pipeline</code> or tracker before you open other decoders.</td></tr>
+</tbody></table></div>
+
+<!-- ======================================================================= -->
+<h2 id="limits"><span class="num">13</span>Limitations</h2>
+<ul>
+  <li>No permissively licensed detector is built. The <code>Detector</code> protocol accepts one (YOLOX, RT-DETR, D-FINE).</li>
+  <li>Real-clip quality is not verified, because the clips have no ground truth.</li>
+  <li>ResNet-18 ImageNet features are not a trained re-ID model. Objects that look the same, for example cars of the same colour, can get the wrong id. The Mahalanobis gate and the class groups reduce this risk.</li>
+  <li>HOTA is a re-implementation, not TrackEval.</li>
+  <li>Ids are unique per stream only.</li>
+  <li>When several optimal assignments exist, the GPU solver can choose a different one than lapjv. The total cost is the same.</li>
+  <li>The GPU cascade always runs the ORU branch, masked per slot.</li>
+  <li>The pipeline is not bit-deterministic from run to run.</li>
+</ul>
+
+<!-- ======================================================================= -->
+<h2 id="licences"><span class="num">14</span>Licences and credits</h2>
+<ul>
+  <li><b>Ultralytics YOLO26 and the <code>ultralytics</code> package: AGPL-3.0.</b> Software that distributes or serves this tracker with the Ultralytics detector gets AGPL obligations.</li>
+  <li>torchvision ResNet-18 weights: BSD-3-Clause.</li>
+  <li>The synthetic clips use person cut-outs from Ultralytics <code>bus.jpg</code> and <code>zidane.jpg</code> (AGPL-3.0 package assets).</li>
+  <li>The tracker code: Apache-2.0 (<code>LICENSE</code>). The file <code>NOTICE</code> lists the third-party material and its terms.</li>
+</ul>
+<p>Images in this manual (frames with tracking boxes added, scaled to 640 px):</p>
+<ul>
+  <li>Figure 7: "Traffic on Slovenska street" by Sounds of Changes, <a href="https://creativecommons.org/licenses/by/3.0/">CC BY 3.0</a>, via <a href="https://commons.wikimedia.org/wiki/File:Traffic_on_Slovenska_street.webm">Wikimedia Commons</a>.</li>
+  <li>Figure 8: "Starling bathing one sparrow eating two doves walking around" by Julie Andreyev, <a href="https://creativecommons.org/licenses/by/3.0/">CC BY 3.0</a>, via <a href="https://commons.wikimedia.org/wiki/File:Starling_bathing_one_sparrow_eating_two_doves_walking_around.webm">Wikimedia Commons</a>.</li>
+  <li>Figure 9: "Soundscapes of Norrköping (4) - Train station" by Erik Pålsson, <a href="https://creativecommons.org/licenses/by/3.0/">CC BY 3.0</a>, via <a href="https://commons.wikimedia.org/wiki/File:Soundscapes_of_Norrk%C3%B6ping_(4)_-_Train_station.webm">Wikimedia Commons</a>.</li>
+  <li>Figure 5: synthetic clip from this project.</li>
+</ul>
+</main>
+</div>
