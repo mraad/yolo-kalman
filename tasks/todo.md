@@ -90,6 +90,6 @@ Decisions (made unattended):
 - [x] PII review: git history author rewritten to the GitHub noreply identity, server paths and
   host names scrubbed from all commits and files
 - [x] LICENSE (Apache-2.0) + NOTICE (third-party material)
-- [ ] open: synthetic clips and docs/img/strip_g120.jpg use person cut-outs from Ultralytics
-  bus.jpg / zidane.jpg (AGPL-3.0 assets, real people); replace before a public release if needed
-- [ ] open: CLAUDE.md says "Do not push the repo"; change it when the repo goes public
+- [x] synthetic clips and docs/img/strip_g120.jpg use person cut-outs from Ultralytics
+  bus.jpg / zidane.jpg (AGPL-3.0 assets, real people): published as is (owner decision), listed in NOTICE
+- [x] public repo https://github.com/mraad/yolo-kalman, branch main; CLAUDE.md updated

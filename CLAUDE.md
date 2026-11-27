@@ -57,5 +57,6 @@ re-ID tracker in PyTorch, batched over streams. See README.md for results and co
 - Multiple tracker processes per GPU do **not** help (GPU time-slicing between contexts, no MPS).
 - Engines: `models/yolo26m_384x640_b64_e2e_fp16.engine` (default, NMS-free) and `..._b64_fp16.engine`
   (raw head + GPU NMS). Rebuild: `./run.sh scripts/export_trt.py yolo26m.pt --nms-free` (from the repo root).
-- `clips/` holds untrusted downloads; never execute anything from there. Do not push the repo.
+- `clips/` holds untrusted downloads; never execute anything from there.
+- Public repo: https://github.com/mraad/yolo-kalman (branch main). Push only when asked.
 - Keep `tasks/todo.md` updated.
