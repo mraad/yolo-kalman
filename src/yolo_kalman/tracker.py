@@ -35,6 +35,7 @@ import torch
 import torch.nn.functional as F
 
 from . import kalman as kf
+from .assign import lap_batch
 
 FREE, TENTATIVE, TRACKED, LOST = 0, 1, 2, 3
 BIG = 6e4  # fits in fp16
@@ -90,6 +91,10 @@ class TrackerConfig:
     min_box_area: float = 10.0
     cuda_graph: bool = True
     compile: bool = True            # torch.compile (inductor) the dense GPU parts before graph capture
+    # assignment solver: "gpu_hungarian" = whole cascade on the GPU with the batched exact Hungarian
+    # kernel (assign.lap_batch); "lapjv" = reference CPU cascade with lap.lapjv per stream and stage
+    assign: str = "gpu_hungarian"
+    max_pending: int = 64           # gpu_hungarian: max submitted-but-uncollected steps
 
 
 @dataclass
@@ -166,14 +171,24 @@ class MultiStreamTracker:
         for k, v in c.class_groups.items():
             lut[k] = v
         self._group_lut = lut
-        self.timing = {"gpu_pre": 0.0, "cpu_match": 0.0, "gpu_post": 0.0}
+        self.timing = {"gpu_pre": 0.0, "match": 0.0, "gpu_post": 0.0}
         self.stats = {"oru": 0, "reid": 0, "ocr": 0, "id_recovered": 0, "dropped_dets": 0, "slots_full": 0}
+        if c.assign not in ("gpu_hungarian", "lapjv"):
+            raise ValueError(f"assign must be 'gpu_hungarian' or 'lapjv', got {c.assign!r}")
+        self.gpu_assign = c.assign == "gpu_hungarian"
+        if self.gpu_assign:
+            self._init_gpu_cascade(fps)
         self.graphs = {}
         if c.compile and cuda:
             kf.UNROLLED_4X4 = True  # element-wise 4x4 Cholesky: fused by inductor
-            self._pre_core = torch.compile(self._pre_core, dynamic=False)
-            self._post_core = torch.compile(self._post_core, dynamic=False)
-            self._post_core_oru = torch.compile(self._post_core_oru, dynamic=False)
+            if self.gpu_assign:
+                self._gpre_core = torch.compile(self._gpre_core, dynamic=False)
+                self._gmatch_core = torch.compile(self._gmatch_core, dynamic=False)
+                self._gpost_core = torch.compile(self._gpost_core, dynamic=False)
+            else:
+                self._pre_core = torch.compile(self._pre_core, dynamic=False)
+                self._post_core = torch.compile(self._post_core, dynamic=False)
+                self._post_core_oru = torch.compile(self._post_core_oru, dynamic=False)
         if c.cuda_graph and cuda:
             self._capture()
 
@@ -192,14 +207,16 @@ class MultiStreamTracker:
     def _capture(self):
         s = torch.cuda.Stream(self.dev)
         s.wait_stream(torch.cuda.current_stream(self.dev))
+        if self.gpu_assign:
+            fns = (("gpre", self._gpre), ("gmatch", self._gmatch), ("gpost", self._gpost))
+        else:
+            fns = (("pre", self._pre), ("post", lambda: self._post(False)), ("post_oru", lambda: self._post(True)))
         with torch.cuda.stream(s):
-            for _ in range(2):  # warm-up (cuBLAS / cuSOLVER handles, allocator)
-                self._pre()
-                self._post(True)
-                self._post(False)
+            for _ in range(2):  # warm-up (cuBLAS / cuSOLVER handles, allocator, CUDA extension build)
+                for _, fn in fns:
+                    fn()
         torch.cuda.current_stream(self.dev).wait_stream(s)
-        for name, fn in (("pre", self._pre), ("post", lambda: self._post(False)),
-                         ("post_oru", lambda: self._post(True))):
+        for name, fn in fns:
             g = torch.cuda.CUDAGraph()
             # thread_local: NVDEC decoder threads keep issuing CUDA calls while we capture
             with torch.cuda.graph(g, stream=s, capture_error_mode="thread_local"):
@@ -207,6 +224,8 @@ class MultiStreamTracker:
             self.graphs[name] = g
         torch.cuda.synchronize(self.dev)
         self._reset_gpu_state()
+        if self.gpu_assign:
+            self._reset_gpu_book()
 
     def _run(self, name, fn):
         if name in self.graphs:
@@ -224,10 +243,10 @@ class MultiStreamTracker:
         self.twh_host.copy_(twh, non_blocking=True)
 
     def _pre_core(self):
+        return self._pre_terms(self.pre_dev[0] > 0.5, self.pre_dev[1] > 0.5, self.pre_dev[2].long())
+
+    def _pre_terms(self, live, lost, kprev):
         c = self.cfg
-        live = self.pre_dev[0] > 0.5
-        lost = self.pre_dev[1] > 0.5
-        kprev = self.pre_dev[2].long()
         mean = self.mean
         if c.freeze_size_when_lost:
             mean = mean.clone()
@@ -342,6 +361,346 @@ class MultiStreamTracker:
             t_prev = torch.where(act, t_k, t_prev)
         return m, cv
 
+    # ==========================================================================================
+    # assign="gpu_hungarian": the whole matching cascade + bookkeeping on the GPU
+    # ==========================================================================================
+    def _init_gpu_cascade(self, fps):
+        S, M, N, dev = self.S, self.M, self.N, self.dev
+        c = self.cfg
+        cuda = dev.type == "cuda"
+        i32 = dict(dtype=torch.int32, device=dev)
+        i64 = dict(dtype=torch.int64, device=dev)
+        self.g_state = torch.zeros(S, M, **i32)
+        self.g_ids = torch.full((S, M), -1, **i64)
+        self.g_tsu = torch.zeros(S, M, **i32)
+        self.g_tsg = torch.zeros(S, M, **i32)
+        self.g_hits = torch.zeros(S, M, **i32)
+        self.g_nobs = torch.zeros(S, M, **i32)
+        self.g_has_emb = torch.zeros(S, M, dtype=torch.bool, device=dev)
+        self.g_ref_wh = torch.ones(S, M, 2, device=dev)
+        self.g_birth = torch.zeros(S, M, **i64)
+        self.g_emb_count = torch.zeros(S, M, **i32)
+        self.g_cls = torch.zeros(S, M, **i64)
+        self.g_score = torch.zeros(S, M, device=dev)
+        self.g_next_id = torch.ones(S, **i64)
+        self.g_frame = torch.zeros(S, **i64)
+        self.g_buffer = torch.as_tensor(self.buffer, **i32)
+        self.g_stats = torch.zeros(6, **i64)       # oru, reid, ocr, id_recovered, -, slots_full
+        self.g_lut = torch.as_tensor(self._group_lut, **i64)
+        self.in_cls = torch.zeros(S, N, **i64)
+        self.in_active = torch.zeros(S, dtype=torch.bool, device=dev)
+        self.in_use_emb = torch.zeros((), dtype=torch.bool, device=dev)
+        # pre -> match intermediates (device, static)
+        self.g_cost = torch.zeros(S, 5, M, N, dtype=torch.float16, device=dev)
+        self.g_det = torch.zeros(S, N, 3, device=dev)
+        self.g_twh = torch.zeros(S, M, 4, device=dev)
+        self.g_tt = torch.zeros(S, 2, M, M, dtype=torch.float16, device=dev)
+        # outputs: device -> pinned ring (one slot per submitted step)
+        self.g_outf = torch.zeros(S, M, 6, device=dev)          # box xyxy, score, output mask
+        self.g_outi = torch.zeros(S, M, 2, **i64)               # id, cls
+        P = c.max_pending
+        pin = dict(pin_memory=cuda)
+        self.ring_f = torch.zeros(P, S, M, 6, **pin)
+        self.ring_i = torch.zeros(P, S, M, 2, dtype=torch.int64, **pin)
+        self.ring_act = torch.zeros(P, S, dtype=torch.bool, **pin)
+        self.ring_flag = torch.zeros(P, dtype=torch.bool, **pin)
+        self.stats_host = torch.zeros(6, dtype=torch.int64, **pin)
+        self._pending = []          # (ring slot, active np, events)
+        self._events = [[torch.cuda.Event(enable_timing=True) for _ in range(4)] for _ in range(P)] if cuda else None
+        self._stats_base = dict(self.stats)
+
+    def _reset_gpu_book(self):
+        self.g_state.zero_()
+        self.g_ids.fill_(-1)
+        for t in (self.g_tsu, self.g_tsg, self.g_hits, self.g_nobs, self.g_birth, self.g_emb_count, self.g_cls,
+                  self.g_score, self.g_frame, self.g_stats):
+            t.zero_()
+        self.g_has_emb.zero_()
+        self.g_ref_wh.fill_(1.0)
+        self.g_next_id.fill_(1)
+
+    def _gpre(self):
+        cost, det, twh, tt = self._gpre_core()
+        self.g_cost.copy_(cost)
+        self.g_det.copy_(det)
+        self.g_twh.copy_(twh)
+        self.g_tt.copy_(tt)
+
+    def _gpre_core(self):
+        c = self.cfg
+        live = (self.g_state != FREE) & self.in_active[:, None]
+        lost = (self.g_state == LOST) & live
+        kprev = (self.g_nobs - 1).clamp(0, c.ocm_delta).long()
+        return self._pre_terms(live, lost, kprev)
+
+    def _gmatch(self):
+        self._gmatch_core()
+
+    def _gmatch_core(self):
+        """S1..S5 + new tracks + id recovery for every stream at once; writes post_dev + book state."""
+        c = self.cfg
+        S, M, N = self.S, self.M, self.N
+        dev = self.dev
+        act = self.in_active
+        ue = self.in_use_emb
+        st = self.g_state
+        live = (st != FREE) & act[:, None]
+        frame = self.g_frame + act.long()
+        tsu = self.g_tsu + live.int()
+        tsg = self.g_tsg + live.int()
+        IOU, D2, IOUL, ANG, ED = self.g_cost.float().unbind(1)            # same fp16 values as lapjv path
+        dd, dwh = self.g_det[..., 0], self.g_det[..., 1:3]
+        twh = self.g_twh[..., :2]
+        sc, vd = self.in_scores, self.in_valid
+        high = vd & (sc >= c.high_thresh)
+        low = vd & (sc >= c.low_thresh) & (sc < c.high_thresh)
+        lut = self.g_lut
+        if c.class_aware:
+            dgrp = lut[self.in_cls.clamp(0, 4095)]
+            tgrp = lut[self.g_cls]
+        else:
+            dgrp = torch.zeros_like(self.in_cls)
+            tgrp = torch.zeros_like(self.g_cls)
+        same = tgrp[:, :, None] == dgrp[:, None, :]
+        hasemb = self.g_has_emb & ue
+        conf = live & ((st == TRACKED) | (st == LOST))
+        matched = torch.zeros(S, M, dtype=torch.bool, device=dev)
+        used = torch.zeros(S, N, dtype=torch.bool, device=dev)
+        mdet = torch.zeros(S, M, dtype=torch.long, device=dev)
+        stage = torch.zeros(S, M, dtype=torch.int32, device=dev)
+
+        def run(rows, cols, cost, limit, k, matched, used, mdet, stage):
+            a = lap_batch(cost, rows & ~matched, cols & ~used, float(limit))
+            hit = a >= 0
+            ai = a.clamp(min=0)
+            hitd = torch.zeros(S, N, dtype=torch.int32, device=dev).scatter_add(1, ai, hit.int()) > 0
+            return (matched | hit, used | hitd, torch.where(hit, ai, mdet),
+                    torch.where(hit, torch.full_like(stage, k), stage))
+
+        BIGf = float(BIG)
+        iou_c = 1.0 - IOU
+        # S1: fused IoU / appearance (BoT-SORT) + OCM, Mahalanobis-gated
+        emb_c = torch.where(hasemb[..., None], ED, 1.0)
+        emb_c = torch.where((emb_c > c.emb_thresh) | (iou_c > c.proximity_thresh), 1.0, emb_c)
+        c1 = torch.minimum(iou_c, emb_c)
+        has_vel = self.g_nobs >= 2
+        c1 = c1 - c.ocm_weight * ANG * sc[:, None, :] * has_vel[..., None]
+        c1 = torch.where((D2 > c.gate_chi2) | ~same | ((IOU <= 0) & (emb_c >= 1.0)), BIGf, c1)
+        matched, used, mdet, stage = run(conf, high, c1, c.match_thresh, 1, matched, used, mdet, stage)
+        # S2: BYTE low-score association, tracks seen last frame only
+        c2 = torch.where((D2 > c.gate_chi2) | ~same, BIGf, iou_c)
+        matched, used, mdet, stage = run(conf & (tsu == 1), low, c2, c.low_match_thresh, 2, matched, used, mdet, stage)
+        # S3: OC-SORT OCR -- last observation vs remaining high dets
+        c3 = torch.where(~same, BIGf, 1.0 - IOUL)
+        matched, used, mdet, stage = run(conf & (tsu <= c.ocr_max_gap), high, c3, c.ocr_thresh, 3,
+                                         matched, used, mdet, stage)
+        # S4: long-term re-ID (appearance) for lost tracks (rows empty when no embeddings)
+        c4 = torch.where((D2 > c.reid_gate_chi2) | ~same | ~hasemb[..., None], BIGf, ED)
+        matched, used, mdet, stage = run(conf & (tsu > 1) & ue, high, c4, c.reid_thresh, 4,
+                                         matched, used, mdet, stage)
+        # S5: tentative tracks
+        c5 = torch.where(~same, BIGf, iou_c)
+        matched, used, mdet, stage = run(live & (st == TENTATIVE), high, c5, c.unconfirmed_thresh, 5,
+                                         matched, used, mdet, stage)
+
+        # ---- matched tracks (vectorised version of the per-pair loop of the lapjv path) ----
+        m = matched
+        g2 = lambda x, i: x.gather(1, i)
+        g3 = lambda x, i: x.gather(1, i[..., None].expand(S, M, x.shape[-1]))
+        sc_b = g2(sc, mdet)
+        dwh_b = g3(dwh, mdet)
+        ref = self.g_ref_wh
+        ratio = torch.minimum((dwh_b / ref.clamp(min=1e-3)).amin(-1), (dwh_b / twh.clamp(min=1e-3)).amin(-1))
+        good = m & (sc_b >= c.high_thresh) & (ratio >= c.shape_change_ratio)
+        gap = torch.where(good, tsg, 0)
+        oru = m & (gap > 1) if c.use_oru else torch.zeros_like(m)
+        n_ocr = (m & (stage == 3)).sum()
+        n_reid = (m & (stage == 4)).sum()
+        n_oru = oru.sum()
+        tsu = torch.where(m, 0, tsu)
+        hits = self.g_hits + m.int()
+        tsg = torch.where(good, 0, tsg)
+        nobs = self.g_nobs + good.int()
+        ref_wh = torch.where(good[..., None], c.size_ema * ref + (1 - c.size_ema) * dwh_b, ref)
+        score = torch.where(m, sc_b, self.g_score)
+        cls_b = g2(self.in_cls, mdet)
+        cls = torch.where(m & (sc_b >= c.high_thresh), cls_b, self.g_cls)
+        confirm = m & (st == TENTATIVE) & (hits >= c.n_init)
+        st = torch.where(confirm | (m & (st == LOST)), TRACKED, st)
+        eu = ue & good & (g2(dd, mdet) < c.emb_update_max_overlap)
+        trust = (sc_b - c.high_thresh) / (1 - c.high_thresh)
+        k = self.g_emb_count.double()   # float32 / float64 mix exactly as the NumPy code of the lapjv path
+        alpha = torch.minimum((c.emb_alpha + (1 - c.emb_alpha) * (1 - trust)).double(), k / (k + 1.0)).float()
+        emb_a = torch.where(eu, alpha, 0.0)
+        has_emb = self.g_has_emb | eu
+        emb_count = self.g_emb_count + eu.int()
+        # ---- unmatched tracks ----
+        um = live & ~m
+        st = torch.where(um & (st == TENTATIVE), FREE, st)
+        st = torch.where(um & (st == TRACKED), LOST, st)
+        st = torch.where(um & (st == LOST) & (tsu > self.g_buffer[:, None]), FREE, st)
+        # ---- new tracks: k-th leftover det (index order) -> k-th free slot (index order) ----
+        rem = vd & (sc >= c.new_track_thresh) & ~used & act[:, None]
+        free = (st == FREE) & act[:, None]
+        rank_d = rem.long().cumsum(1) - 1
+        rank_s = free.long().cumsum(1) - 1
+        nrem = rem.sum(1)
+        n_full = (nrem - free.sum(1)).clamp(min=0).sum()
+        d_of_rank = torch.zeros(S, N + 1, dtype=torch.long, device=dev).scatter(
+            1, torch.where(rem, rank_d, N), torch.arange(N, device=dev).expand(S, N))
+        new = free & (rank_s < nrem[:, None])
+        ndet = torch.where(new, d_of_rank.gather(1, rank_s.clamp(0, N)), 0)
+        first = (frame == 1)[:, None]
+        st = torch.where(new, torch.where(first, TRACKED, TENTATIVE), st)
+        tsu = torch.where(new, 0, tsu)
+        tsg = torch.where(new, 0, tsg)
+        hits = torch.where(new, 1, hits)
+        nobs = torch.where(new, 1, nobs)
+        cls = torch.where(new, g2(self.in_cls, ndet), cls)
+        score = torch.where(new, g2(sc, ndet), score)
+        ref_wh = torch.where(new[..., None], g3(dwh, ndet), ref_wh)
+        he = new & ue & (g2(dd, ndet) < c.emb_update_max_overlap)
+        has_emb = torch.where(new, he, has_emb)
+        emb_count = torch.where(new, he.int(), emb_count)
+        birth = torch.where(new, frame[:, None], self.g_birth)
+        emb_upd = torch.where(new, he, eu)
+        emb_a = torch.where(new, 0.0, emb_a)
+        # ids: confirmations first, then first-frame births, each in slot order (as the lapjv path)
+        newfirst = new & first
+        nconf = confirm.sum(1, keepdim=True)
+        rk = torch.where(confirm, confirm.long().cumsum(1) - 1, nconf + newfirst.long().cumsum(1) - 1)
+        ids = torch.where(confirm | newfirst, self.g_next_id[:, None] + rk,
+                          torch.where(new, -1, self.g_ids))
+        next_id = self.g_next_id + nconf[:, 0] + newfirst.sum(1)
+        # ---- id recovery: young confirmed tracks vs tracks already lost when they were born ----
+        n_rec = torch.zeros((), dtype=torch.long, device=dev)
+        if c.id_recovery:
+            age = frame[:, None] - birth
+            young = ue & (st == TRACKED) & (tsu == 0) & has_emb & (age >= c.young_min_frames) \
+                & (age <= c.young_max_frames) & act[:, None]
+            lostm = ue & (st == LOST) & has_emb & (tsu > 1) & act[:, None]
+            last_seen = frame[:, None] - tsu
+            E, G = self.g_tt.float().unbind(1)
+            grp = lut[cls]
+            ok = (G <= c.reid_gate_chi2) & (last_seen[:, :, None] < birth[:, None, :]) \
+                & (grp[:, :, None] == grp[:, None, :])
+            a = lap_batch(torch.where(ok, E, BIGf), lostm, young, float(c.reid_thresh))
+            hit = a >= 0
+            tgt = torch.where(hit, a, M)
+            ids = torch.cat([ids, ids.new_zeros(S, 1)], 1).scatter(1, tgt, ids)[:, :M]
+            birth = torch.cat([birth, birth.new_zeros(S, 1)], 1).scatter(1, tgt, birth)[:, :M]
+            st = torch.where(hit, FREE, st)
+            n_rec = hit.sum()
+        # ---- write back ----
+        self.post_dev.copy_(torch.stack([m.float(), mdet.float(), good.float(), torch.where(oru, gap, 0).float(),
+                                         new.float(), ndet.float(), emb_upd.float(), emb_a]))
+        self.g_state.copy_(st)
+        self.g_ids.copy_(ids)
+        self.g_tsu.copy_(tsu)
+        self.g_tsg.copy_(tsg)
+        self.g_hits.copy_(hits)
+        self.g_nobs.copy_(nobs)
+        self.g_has_emb.copy_(has_emb)
+        self.g_ref_wh.copy_(ref_wh)
+        self.g_birth.copy_(birth)
+        self.g_emb_count.copy_(emb_count)
+        self.g_cls.copy_(cls)
+        self.g_score.copy_(score)
+        self.g_next_id.copy_(next_id)
+        self.g_frame.copy_(frame)
+        zero = torch.zeros((), dtype=torch.long, device=dev)
+        self.g_stats.add_(torch.stack([n_oru, n_reid, n_ocr, n_rec, zero, n_full]))
+
+    def _gpost(self):
+        f, i = self._gpost_core()
+        self.g_outf.copy_(f)
+        self.g_outi.copy_(i)
+
+    def _gpost_core(self):
+        box = self._post_impl(True)    # ORU branch is masked per slot (gap > 1)
+        mask = (self.g_state == TRACKED) & (self.g_tsu == 0) & self.in_active[:, None]
+        f = torch.cat([box, self.g_score[..., None], mask[..., None].float()], -1)
+        return f, torch.stack([self.g_ids, self.g_cls], -1)
+
+    # ------------------------------------------------------------------------------------------
+    @torch.no_grad()
+    def submit(self, boxes: torch.Tensor, scores: torch.Tensor, cls: torch.Tensor, valid: torch.Tensor,
+               emb: torch.Tensor | None = None, active: np.ndarray | None = None, **_ignored):
+        """Enqueue one tracker step on the current CUDA stream without any host sync
+        (assign="gpu_hungarian" only).  Results come from :meth:`collect`."""
+        assert self.gpu_assign, "submit/collect need assign='gpu_hungarian'"
+        cfg, S = self.cfg, self.S
+        if len(self._pending) >= cfg.max_pending:
+            raise RuntimeError("too many pending steps: call collect()")
+        t0 = time.perf_counter()
+        k = len(self._pending)
+        use_emb = emb is not None and cfg.use_appearance
+        active = np.ones(S, bool) if active is None else np.asarray(active, bool)
+        n = self._load_inputs(boxes, scores, valid, emb if use_emb else None)
+        self.in_cls[:, :n].copy_(cls[:, :n])
+        if n < self.N:
+            self.in_cls[:, n:] = 0
+        # per-step pinned staging slots: an async H2D copy reads them later, so never reuse before collect
+        self.ring_act[k] = torch.from_numpy(active)
+        self.ring_flag[k] = use_emb
+        self.in_active.copy_(self.ring_act[k], non_blocking=True)
+        self.in_use_emb.copy_(self.ring_flag[k], non_blocking=True)
+        cs = torch.cuda.current_stream(self.dev) if self._events else None
+        ev = self._events[k] if self._events else None
+        if ev:
+            ev[0].record(cs)
+        self._run("gpre", self._gpre)
+        if ev:
+            ev[1].record(cs)
+        self._run("gmatch", self._gmatch)
+        if ev:
+            ev[2].record(cs)
+        self._run("gpost", self._gpost)
+        if ev:
+            ev[3].record(cs)
+        self.ring_f[k].copy_(self.g_outf, non_blocking=True)
+        self.ring_i[k].copy_(self.g_outi, non_blocking=True)
+        self._pending.append((k, active))
+        self.timing["host"] = self.timing.get("host", 0.0) + time.perf_counter() - t0
+
+    @torch.no_grad()
+    def collect(self) -> list[list[FrameOutput | None]]:
+        """One host sync for every pending step; returns their outputs in submission order."""
+        t0 = time.perf_counter()
+        if not self._pending:
+            return []
+        self.stats_host.copy_(self.g_stats, non_blocking=True)
+        if self.dev.type == "cuda":
+            torch.cuda.current_stream(self.dev).synchronize()
+        t1 = time.perf_counter()
+        res = []
+        for k, active in self._pending:
+            f = self.ring_f[k].numpy()
+            i = self.ring_i[k].numpy()
+            outs = []
+            for s in range(self.S):
+                if not active[s]:
+                    outs.append(None)
+                    continue
+                sl = np.nonzero(f[s, :, 5] > 0.5)[0]
+                outs.append(FrameOutput(i[s, sl, 0].copy(), f[s, sl, :4].copy(), f[s, sl, 4].copy(),
+                                        i[s, sl, 1].copy()))
+            res.append(outs)
+            if self._events:
+                ev = self._events[k]
+                self.timing["gpu_pre"] += ev[0].elapsed_time(ev[1]) / 1e3
+                self.timing["match"] += ev[1].elapsed_time(ev[2]) / 1e3
+                self.timing["gpu_post"] += ev[2].elapsed_time(ev[3]) / 1e3
+        self._pending.clear()
+        st = self.stats_host.tolist()
+        for j, key in enumerate(("oru", "reid", "ocr", "id_recovered", None, "slots_full")):
+            if key:
+                self.stats[key] = self._stats_base[key] + st[j]
+        t2 = time.perf_counter()
+        self.timing["sync_wait"] = self.timing.get("sync_wait", 0.0) + t1 - t0
+        self.timing["host"] = self.timing.get("host", 0.0) + t2 - t0
+        return res
+
     # ------------------------------------------------------------------------------------------
     def reset_stream(self, s: int, fps: float | None = None):
         self.state[s] = FREE
@@ -352,6 +711,15 @@ class MultiStreamTracker:
         self.frame[s] = 0
         if fps:
             self.buffer[s] = max(1, int(round(fps * self.cfg.lost_buffer_s)))
+        if self.gpu_assign:
+            assert not self._pending, "collect() before reset_stream()"
+            self.g_state[s] = FREE
+            self.g_ids[s] = -1
+            for t in (self.g_tsu, self.g_tsg, self.g_hits, self.g_nobs, self.g_frame):
+                t[s] = 0
+            self.g_has_emb[s] = False
+            self.g_next_id[s] = 1
+            self.g_buffer[s] = int(self.buffer[s])
 
     def _load_inputs(self, boxes, scores, valid, emb):
         n = min(boxes.shape[1], self.N)
@@ -384,6 +752,9 @@ class MultiStreamTracker:
         padded/truncated to ``max_dets``), emb [S,n,D] unit vectors or None.  ``active[s]=False``
         skips stream s (no frame).  ``*_np``: optional host copies of scores/cls/valid.
         """
+        if self.gpu_assign:
+            self.submit(boxes, scores, cls, valid, emb, active)
+            return self.collect()[0]
         cfg, S = self.cfg, self.S
         use_emb = emb is not None and cfg.use_appearance
         active = np.ones(S, bool) if active is None else np.asarray(active, bool)
@@ -585,6 +956,6 @@ class MultiStreamTracker:
                                     self.cls[s, slots].copy()))
         t3 = time.perf_counter()
         self.timing["gpu_pre"] += t1 - t0
-        self.timing["cpu_match"] += t2 - t1
+        self.timing["match"] += t2 - t1
         self.timing["gpu_post"] += t3 - t2
         return outs

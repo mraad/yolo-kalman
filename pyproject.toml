@@ -17,6 +17,7 @@ dependencies = [
     "motmetrics",
     "pynvvideocodec>=2.2.4",
     "tensorrt-cu13>=11.5.0.63",
+    "ninja>=1.13.2",
 ]
 
 [tool.uv.sources]

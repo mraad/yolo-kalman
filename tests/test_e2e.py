@@ -38,7 +38,7 @@ def test_real_clip_runs_and_tracks_bus():
             if cc in (2, 5, 7):
                 counts[int(i)] = counts.get(int(i), 0) + 1
     assert max(counts.values()) >= 0.6 * res.frames, counts
-    assert pipe.timing["detect"] > 0 and pipe.tracker.timing["cpu_match"] > 0
+    assert pipe.timing["detect"] > 0 and pipe.tracker.timing["match"] > 0
 
 
 @pytest.mark.skipif(not SYN.exists(), reason="run scripts/make_synthetic.py first")

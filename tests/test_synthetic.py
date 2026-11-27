@@ -75,12 +75,30 @@ def test_clutter_and_metrics():
         assert h["HOTA"] > 0.7, h
 
 
-def test_cuda_graph_compiled_matches_eager():
+@pytest.mark.parametrize("assign", ["gpu_hungarian", "lapjv"])
+def test_cuda_graph_compiled_matches_eager(assign):
     """torch.compile + CUDA graph path gives the same ids/boxes as plain eager torch."""
     scenes = [gap_scene(30), crossing_scene()]
-    _, outs_g, _ = run_scenes(scenes, cfg=TrackerConfig(cuda_graph=True, compile=True))
-    _, outs_e, _ = run_scenes(scenes, cfg=TrackerConfig(cuda_graph=False, compile=False))
+    _, outs_g, _ = run_scenes(scenes, cfg=TrackerConfig(cuda_graph=True, compile=True, assign=assign))
+    _, outs_e, _ = run_scenes(scenes, cfg=TrackerConfig(cuda_graph=False, compile=False, assign=assign))
     for og, oe in zip(outs_g, outs_e):
         for (ig, bg), (ie, be) in zip(og, oe):
             np.testing.assert_array_equal(ig, ie)
             np.testing.assert_allclose(bg, be, atol=1e-3)
+
+
+@pytest.mark.parametrize("use_emb", [True, False], ids=["reid", "motion-only"])
+def test_gpu_hungarian_cascade_matches_lapjv(use_emb):
+    """GPU cascade (batched Hungarian) == CPU cascade (lap.lapjv): same ids, boxes and counters."""
+    scenes = [gap_scene(g) for g in GAPS] + [crossing_scene()]
+    res = {}
+    for a in ("lapjv", "gpu_hungarian"):
+        _, outs, trk = run_scenes(scenes, cfg=TrackerConfig(compile=False, assign=a), use_emb=use_emb, fp_rate=0.5)
+        res[a] = (outs, dict(trk.stats))
+    (oa, sa), (ob, sb) = res["lapjv"], res["gpu_hungarian"]
+    assert sa == sb
+    for xa, xb in zip(oa, ob):
+        assert len(xa) == len(xb)
+        for (ia, ba), (ib, bb) in zip(xa, xb):
+            np.testing.assert_array_equal(ia, ib)
+            np.testing.assert_allclose(ba, bb, atol=1e-3)
