@@ -175,7 +175,7 @@ class MultiStreamTracker:
         self.stats = {"oru": 0, "reid": 0, "ocr": 0, "id_recovered": 0, "dropped_dets": 0, "slots_full": 0}
         if c.assign not in ("gpu_hungarian", "lapjv"):
             raise ValueError(f"assign must be 'gpu_hungarian' or 'lapjv', got {c.assign!r}")
-        self.gpu_assign = c.assign == "gpu_hungarian"
+        self.gpu_assign = c.assign == "gpu_hungarian" and cuda  # lap_batch is CUDA-only: CPU uses lapjv
         if self.gpu_assign:
             self._init_gpu_cascade(fps)
         self.graphs = {}
@@ -775,7 +775,8 @@ class MultiStreamTracker:
         ph[2] = np.minimum(self.nobs - 1, cfg.ocm_delta).clip(0)
         self.pre_dev.copy_(self.pre_host, non_blocking=True)
         self._run("pre", self._pre)
-        torch.cuda.current_stream(self.dev).synchronize()
+        if self.dev.type == "cuda":
+            torch.cuda.current_stream(self.dev).synchronize()
         self.tsu[live] += 1
         self.tsg[live] += 1
         host = self.cost_host.numpy()
@@ -944,7 +945,8 @@ class MultiStreamTracker:
             self._run("post_oru", lambda: self._post(True))
         else:
             self._run("post", lambda: self._post(False))
-        torch.cuda.current_stream(self.dev).synchronize()
+        if self.dev.type == "cuda":
+            torch.cuda.current_stream(self.dev).synchronize()
         ob = self.out_host.numpy()
         outs: list[FrameOutput | None] = []
         out_mask = (self.state == TRACKED) & (self.tsu == 0)

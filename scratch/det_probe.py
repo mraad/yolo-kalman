@@ -1,13 +1,21 @@
 import time, torch, numpy as np
 from yolo_kalman.decode import NvDecSource
 from yolo_kalman.detector import TRTYolo, TorchYolo
-from yolo_kalman.preprocess import letterbox_into, unletterbox_boxes
+from yolo_kalman.preprocess import letterbox_into
+
+
+def to_src(b, r, off, hw):
+    """letterbox x1y1x2y2 -> source pixels, clipped (same mapping as Pipeline._detect_embed)"""
+    b = b.clone()
+    b[:, [0, 2]] = ((b[:, [0, 2]] - off[1]) / r).clamp(0, hw[1])
+    b[:, [1, 3]] = ((b[:, [1, 3]] - off[0]) / r).clamp(0, hw[0])
+    return b
 src = NvDecSource("clips/Traffic_on_Slovenska_street.webm", chunk=32)
 [src.read(32) for _ in range(10)]; fr = src.read(32); print(fr.shape)
 det = TRTYolo("models/yolo26m_384x640_b64_fp16.engine", conf=0.25)
 x = torch.empty(32,3,384,640, dtype=torch.float16, device="cuda")
 r, off = letterbox_into(x, fr)
-d = det(x); b = unletterbox_boxes(d.boxes[0][d.valid[0]], r, off, src.hw)
+d = det(x); b = to_src(d.boxes[0][d.valid[0]], r, off, src.hw)
 print("trt", d.valid.sum(1).tolist()[:8]); print(torch.cat([b, d.scores[0][d.valid[0]][:,None], d.cls[0][d.valid[0]][:,None].float()],1)[:6].cpu().numpy().round(1))
 tm = TorchYolo("models/yolo26m.pt", conf=0.25)
 d2 = tm(x); print("torch", d2.valid.sum(1).tolist()[:8])

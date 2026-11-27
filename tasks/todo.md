@@ -78,7 +78,7 @@ Decisions (made unattended):
 - [x] removed lap_batch_torch (no caller outside tests); lap_batch raises on CPU tensors
 - [x] removed dead code: unletterbox_boxes, motion_matrix, Pipeline keep_frames, Detections.__getitem__
 - [x] bench.py --repeats (median-FPS run reported, all runs in fps_runs); engine path recorded relative
-- [x] pytest / motmetrics moved to the uv dev group
+- [x] pytest moved to the uv dev group (motmetrics stays runtime: metrics.clear_id imports it)
 - [x] /simplify pass: cached device props (CUDAGuard + sharedMemPerBlockOptin), comments, test cleanup
 - [x] verified: 23/23 tests strict; synth metrics identical to before; bench median of 3 (5,272 fps at 16
   streams, 5,664 at 32; lapjv 3,200 / 3,798) -> results/bench/bench_audit_*.json

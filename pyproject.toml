@@ -17,6 +17,7 @@ dependencies = [
     "pynvvideocodec>=2.2.4",
     "tensorrt-cu13>=11.5.0.63",
     "ninja>=1.13.2",
+    "motmetrics>=1.4.0",
 ]
 
 [tool.uv.sources]
@@ -34,7 +35,6 @@ build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
-    "motmetrics>=1.4.0",
     "pytest>=9.2.0",
 ]
 

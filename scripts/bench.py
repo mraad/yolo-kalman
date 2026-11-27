@@ -175,6 +175,8 @@ def main():
                     help="tracker assignment solver")
     ap.add_argument("--repeats", type=int, default=3, help="runs per setting; the median-FPS run is reported")
     a = ap.parse_args()
+    if a.repeats < 1 or a.repeats % 2 == 0:
+        ap.error("--repeats must be a positive odd number (the median run is reported)")
     cfg_kw = {"engine": a.engine, "chunk": a.chunk, "max_frames": a.frames,
               "use_reid": not a.no_reid, "overlap": not a.no_overlap, "profile": a.profile,
               "classes": [0, 1, 2, 3, 5, 7, 14, 15, 16], "tracker": {"assign": a.assign}}
@@ -182,7 +184,7 @@ def main():
     out.mkdir(parents=True, exist_ok=True)
     rows = []
     for n in a.streams:
-        runs = sorted((run_config(n, a.gpus, dict(cfg_kw), a.wpg) for _ in range(max(1, a.repeats))),
+        runs = sorted((run_config(n, a.gpus, dict(cfg_kw), a.wpg) for _ in range(a.repeats)),
                       key=lambda x: x["fps_total"])
         r = runs[len(runs) // 2]
         r["fps_runs"] = [round(x["fps_total"], 1) for x in runs]

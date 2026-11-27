@@ -161,9 +161,9 @@ dropped in. I did not build one; see "not done".
 
 ## Commands
 ```bash
-~/.local/bin/uv sync                                   # env (torch 2.14+cu130, TensorRT 11.5, PyNvVideoCodec); dev group: pytest, motmetrics
+~/.local/bin/uv sync                                   # env (torch 2.14+cu130, TensorRT 11.5, PyNvVideoCodec); dev group: pytest
 ./run.sh scripts/download_clips.py                     # Wikimedia 480p VP9 transcodes -> clips/ (untrusted data)
-cd models && ../run.sh ../scripts/export_trt.py yolo26m.pt --nms-free && cd ..   # TRT FP16 engine
+./run.sh scripts/export_trt.py yolo26m.pt --nms-free   # TRT FP16 engine -> models/ (downloads yolo26m.pt)
 ./run.sh scripts/make_synthetic.py                     # synthetic occlusion clips + GT -> data/synth
 REQUIRE_E2E=1 ./run.sh -m pytest -rs -q               # 23 tests (KF, solver vs scipy/lapjv, synthetic, e2e)
 ./run.sh scripts/eval_synth.py --overlay               # HOTA/IDF1/IDSW + ablations -> results/synth (--assign lapjv)
@@ -384,7 +384,7 @@ but I have not proven the root cause.
 * The GPU cascade always runs the ORU branch of the post graph (masked per slot). The lapjv path only
   runs it on frames that need it.
 * The CUDA kernel is JIT-built on first use (≈40 s, needs nvcc from /usr/local/cuda). `lap_batch`
-  needs CUDA tensors; on the CPU use `assign="lapjv"`.
+  needs CUDA tensors; a tracker on a CPU device uses the lapjv cascade automatically.
 * The end-to-end pipeline is not bit-deterministic run to run (lapjv against itself already diverges
   within 5–170 frames on real clips, even with the sequential pipeline). That is detector/embedding
   numerics, not the solver. Solver comparisons on real data therefore use recorded-input replays (see

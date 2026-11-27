@@ -1,5 +1,6 @@
 <title>yolo-kalman Manual</title>
 <meta name="claude:viewport-fit-sides" content="cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@500;600;700&family=Source+Sans+3:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono:wght@400;600&display=swap">
 <style>
@@ -597,7 +598,7 @@ print(lap_batch(cost, rows, cols, 0.8).tolist())   # [[0, 1, -1], [1, 0, -1]]</c
 <h3><span class="num">9.1</span>Install the environment</h3>
 <ol class="steps">
   <li>Go to the project folder.<pre><code>cd ~/GWorkspace/yolo-kalman</code></pre></li>
-  <li>Sync the environment. This installs torch 2.14 (cu130), TensorRT 11.5, PyNvVideoCodec and the dev group (pytest, motmetrics).<pre><code>~/.local/bin/uv sync</code></pre></li>
+  <li>Sync the environment. This installs torch 2.14 (cu130), TensorRT 11.5, PyNvVideoCodec, motmetrics and the dev group (pytest).<pre><code>~/.local/bin/uv sync</code></pre></li>
   <li>Make sure that nvcc is at <code>/usr/local/cuda/bin/nvcc</code>. The solver kernel needs it for the first build.</li>
 </ol>
 
@@ -610,9 +611,7 @@ print(lap_batch(cost, rows, cols, 0.8).tolist())   # [[0, 1, -1], [1, 0, -1]]</c
 
 <h3><span class="num">9.3</span>Export the detector engine</h3>
 <ol class="steps">
-  <li>Go to the models folder.<pre><code>cd models</code></pre></li>
-  <li>Export the TensorRT FP16 engine with the NMS-free head.<pre><code>../run.sh ../scripts/export_trt.py yolo26m.pt --nms-free</code></pre></li>
-  <li>Go back to the project folder.<pre><code>cd ..</code></pre></li>
+  <li>Export the TensorRT FP16 engine with the NMS-free head. Run the command in the project folder. The script downloads <code>yolo26m.pt</code> and writes the engine to <code>models/</code>.<pre><code>./run.sh scripts/export_trt.py yolo26m.pt --nms-free</code></pre></li>
 </ol>
 
 <h3><span class="num">9.4</span>Make the synthetic clips</h3>

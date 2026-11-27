@@ -36,7 +36,7 @@ re-ID tracker in PyTorch, batched over streams. See README.md for results and co
 
 ## Gotchas
 - Tests: `REQUIRE_E2E=1 ./run.sh -m pytest -rs -q`. Without it, missing engine/clips make the e2e
-  tests skip silently. pytest/motmetrics are in the uv dev group.
+  tests skip silently. pytest is in the uv dev group; motmetrics is a runtime dependency (metrics.clear_id).
 - Benchmarks: `--repeats 3` (median-FPS run reported, all runs in `fps_runs`); clips cap a stream at
   ~1,350 frames, so repeat instead of lengthening runs.
 - CUDA-graph capture: create the tracker **before** opening NVDEC decoders (decoder threads on
@@ -56,6 +56,6 @@ re-ID tracker in PyTorch, batched over streams. See README.md for results and co
   `scratch/warm.py` before multi-worker benchmarks.
 - Multiple tracker processes per GPU do **not** help (GPU time-slicing between contexts, no MPS).
 - Engines: `models/yolo26m_384x640_b64_e2e_fp16.engine` (default, NMS-free) and `..._b64_fp16.engine`
-  (raw head + GPU NMS). Rebuild: `cd models && ../run.sh ../scripts/export_trt.py yolo26m.pt --nms-free`.
+  (raw head + GPU NMS). Rebuild: `./run.sh scripts/export_trt.py yolo26m.pt --nms-free` (from the repo root).
 - `clips/` holds untrusted downloads; never execute anything from there. Do not push the repo.
 - Keep `tasks/todo.md` updated.

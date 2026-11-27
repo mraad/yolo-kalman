@@ -102,3 +102,16 @@ def test_gpu_hungarian_cascade_matches_lapjv(use_emb):
         for (ia, ba), (ib, bb) in zip(xa, xb):
             np.testing.assert_array_equal(ia, ib)
             np.testing.assert_allclose(ba, bb, atol=1e-3)
+
+
+def test_cpu_tracker_runs_lapjv_cascade():
+    """A CPU tracker (lap_batch is CUDA-only) falls back to the lapjv cascade and matches it on the GPU."""
+    scenes = [gap_scene(30), crossing_scene()]
+    _, out_cpu, trk = run_scenes(scenes, cfg=TrackerConfig(compile=False), device="cpu", fp_rate=0.5)
+    assert not trk.gpu_assign
+    _, out_gpu, _ = run_scenes(scenes, cfg=TrackerConfig(compile=False, assign="lapjv"), fp_rate=0.5)
+    for xa, xb in zip(out_cpu, out_gpu):
+        assert len(xa) == len(xb)
+        for (ia, ba), (ib, bb) in zip(xa, xb):
+            np.testing.assert_array_equal(ia, ib)
+            np.testing.assert_allclose(ba, bb, atol=1e-2)

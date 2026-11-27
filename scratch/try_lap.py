@@ -1,6 +1,6 @@
 import time, numpy as np, torch, lap
 from scipy.optimize import linear_sum_assignment
-from yolo_kalman.assign import lap_batch, lap_batch_torch, extended_cost
+from yolo_kalman.assign import lap_batch, extended_cost
 
 def ref(c, limit):
     n, m = c.shape
@@ -19,7 +19,7 @@ for trial in range(0):
     rm = rng.random((B, R)) < 0.8; cm = rng.random((B, C)) < 0.8
     limit = float(rng.choice([0.25, 0.5, 0.8]))
     tc = torch.from_numpy(cost).cuda(); trm = torch.from_numpy(rm).cuda(); tcm = torch.from_numpy(cm).cuda()
-    for fn in (lap_batch, lap_batch_torch):
+    for fn in (lap_batch,):
         out = fn(tc, trm, tcm, limit).cpu().numpy()
         for b in range(B):
             rows, cols = np.nonzero(rm[b])[0], np.nonzero(cm[b])[0]
@@ -41,7 +41,7 @@ print('bad', bad)
 # timing
 for B, n in [(8, 20), (16, 40), (32, 160)]:
     cost = torch.rand(B, n, n, device='cuda'); rm = torch.ones(B, n, dtype=bool, device='cuda'); cm = rm.clone()
-    for fn in (lap_batch, lap_batch_torch):
+    for fn in (lap_batch,):
         fn(cost, rm, cm, 0.8); torch.cuda.synchronize(); t=time.perf_counter()
         for _ in range(10): fn(cost, rm, cm, 0.8)
         torch.cuda.synchronize(); print(getattr(fn, "__name__", "lap_batch_cuda"), B, n, (time.perf_counter()-t)/10*1e3, 'ms')

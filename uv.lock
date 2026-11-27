@@ -1041,6 +1041,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "lap" },
+    { name = "motmetrics" },
     { name = "ninja" },
     { name = "numpy" },
     { name = "nvidia-ml-py" },
@@ -1055,13 +1056,13 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
-    { name = "motmetrics" },
     { name = "pytest" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "lap" },
+    { name = "motmetrics", specifier = ">=1.4.0" },
     { name = "ninja", specifier = ">=1.13.2" },
     { name = "numpy" },
     { name = "nvidia-ml-py" },
@@ -1075,7 +1076,4 @@ requires-dist = [
 ]
 
 [package.metadata.requires-dev]
-dev = [
-    { name = "motmetrics", specifier = ">=1.4.0" },
-    { name = "pytest", specifier = ">=9.2.0" },
-]
+dev = [{ name = "pytest", specifier = ">=9.2.0" }]
